@@ -4,7 +4,7 @@ ENV NODE_ENV=production
 ENV PORT=3000
 ENV TZ=Europe/Madrid
 ENV DB_FILE=/data/app.sqlite
-ENV EINK_RENDER_URL=http://127.0.0.1:3000/eink
+ENV EINK_RENDER_URL=
 ENV PUPPETEER_CACHE_DIR=/app/.cache/puppeteer
 
 RUN apt-get update \
@@ -58,6 +58,6 @@ EXPOSE 3000
 VOLUME ["/data"]
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-  CMD node -e "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+  CMD node -e "const port=process.env.PORT||3000; fetch(`http://127.0.0.1:${port}/api/health`).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
 CMD ["npm", "run", "start", "--workspace", "backend"]
