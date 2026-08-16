@@ -1,0 +1,33 @@
+idf_component_register(
+  SRCS
+    "app_config.c"
+    "bmp_decoder.c"
+    "buzzer.c"
+    "buttons.c"
+    "display_driver.c"
+    "main.c"
+    "mqtt_app.c"
+    "sensors.c"
+    "server_api.c"
+    "wifi_portal.c"
+  INCLUDE_DIRS "include"
+  REQUIRES
+    driver
+    esp_adc
+    esp_event
+    esp_driver_ledc
+    esp_hw_support
+    esp_http_client
+    esp_http_server
+    esp_netif
+    esp_timer
+    esp_wifi
+    freertos
+    heap
+    cjson
+    log
+    lwip
+    mqtt
+    nvs_flash
+    esp_epaper
+)

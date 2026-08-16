@@ -1,0 +1,17 @@
+node_modules
+frontend/node_modules
+backend/node_modules
+frontend/dist
+backend/data
+backend/*.sqlite*
+*.sqlite*
+*.db
+firmware
+firmware/build
+firmware/managed_components
+firmware/components/esp_epaper
+.git
+.env
+backend/.env
+*.log
+npm-debug.log*

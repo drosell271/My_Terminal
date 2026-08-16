@@ -1,0 +1,15 @@
+{
+  "name": "backend",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test src/*.test.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "ical.js": "^2.2.1",
+    "puppeteer": "^25.7.0",
+    "sharp": "^0.35.3"
+  }
+}

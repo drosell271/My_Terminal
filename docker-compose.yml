@@ -1,0 +1,25 @@
+services:
+  my-terminal:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: my-terminal:latest
+    container_name: my_terminal
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      TZ: Europe/Madrid
+      DB_FILE: /data/app.sqlite
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-}
+      EINK_RENDER_URL: http://127.0.0.1:3000/eink
+      PUPPETEER_CACHE_DIR: /app/.cache/puppeteer
+      ADMIN_TOKEN: ${ADMIN_TOKEN:-}
+      DEVICE_TOKEN: ${DEVICE_TOKEN:-}
+      CORS_ORIGIN: ${CORS_ORIGIN:-}
+      OPENWEATHER_API_KEY: ${OPENWEATHER_API_KEY:-}
+    volumes:
+      - /home/daniel/docker/my_terminal:/data
+    shm_size: "1gb"
