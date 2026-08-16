@@ -56,6 +56,8 @@ const emptyDashboard = {
     latitude: "",
     longitude: "",
     units: "metric",
+    temperatureUnit: "celsius",
+    windUnit: "ms",
     openWeatherApiKey: "",
     hasOpenWeatherApiKey: false,
   },
@@ -105,7 +107,11 @@ export default function ControlPanel() {
     setDashboard(next);
     setSettings(next.settings);
     setCalendars(assignCalendarColors(next.calendars));
-    setWeatherLocation({ ...next.weatherLocation, openWeatherApiKey: "" });
+    setWeatherLocation({
+      ...emptyDashboard.weatherLocation,
+      ...next.weatherLocation,
+      openWeatherApiKey: "",
+    });
     setExceptionText(
       (next.eventExceptions || [])
         .map((exception) => exception.keyword)
@@ -240,6 +246,8 @@ export default function ControlPanel() {
     }));
   }
 
+  const sensorUpdatedAt = formatDateTime(dashboard.sensors.updatedAt);
+
   return (
     <main className="control-shell">
       <header className="control-header">
@@ -261,25 +269,25 @@ export default function ControlPanel() {
           icon={Battery}
           label="Bateria"
           value={formatPercent(dashboard.sensors.batteryPercent)}
-          detail={formatDateTime(dashboard.sensors.updatedAt)}
+          detail={sensorUpdatedAt}
         />
         <SensorMetric
           icon={Thermometer}
           label="Temperatura"
           value={formatDegrees(dashboard.sensors.temperatureC)}
-          detail="Sensor interno"
+          detail={sensorUpdatedAt}
         />
         <SensorMetric
           icon={Droplets}
           label="Humedad"
           value={formatPercent(dashboard.sensors.humidityPercent)}
-          detail="Sensor interno"
+          detail={sensorUpdatedAt}
         />
         <SensorMetric
           icon={Wifi}
           label="RSSI"
           value={formatRssi(dashboard.sensors.rssi)}
-          detail="MQTT/WiFi"
+          detail={sensorUpdatedAt}
         />
       </section>
 
@@ -433,14 +441,27 @@ export default function ControlPanel() {
               step="0.0001"
             />
             <label className="field">
-              <span>Unidades widget</span>
+              <span>Temperatura</span>
               <select
-                value={weatherLocation.units}
-                onChange={(event) => updateWeatherLocation("units", event.target.value)}
+                value={weatherLocation.temperatureUnit || "celsius"}
+                onChange={(event) =>
+                  updateWeatherLocation("temperatureUnit", event.target.value)
+                }
               >
-                <option value="metric">Celsius · m/s</option>
-                <option value="imperial">Fahrenheit · mph</option>
-                <option value="standard">Kelvin · m/s</option>
+                <option value="celsius">Celsius</option>
+                <option value="fahrenheit">Fahrenheit</option>
+                <option value="kelvin">Kelvin</option>
+              </select>
+            </label>
+            <label className="field">
+              <span>Viento</span>
+              <select
+                value={weatherLocation.windUnit || "ms"}
+                onChange={(event) => updateWeatherLocation("windUnit", event.target.value)}
+              >
+                <option value="ms">m/s</option>
+                <option value="kmh">km/h</option>
+                <option value="mph">mph</option>
               </select>
             </label>
             <PasswordField
@@ -715,20 +736,25 @@ function getStoredAdminToken() {
 }
 
 function formatPercent(value) {
-  return value === null || value === undefined ? "--%" : `${Math.round(value)}%`;
+  return value === null || value === undefined ? "--" : `${Math.round(value)}%`;
 }
 
 function formatDegrees(value) {
-  return value === null || value === undefined ? "--°C" : `${Number(value).toFixed(1)}°C`;
+  return value === null || value === undefined ? "--" : `${Number(value).toFixed(1)}°C`;
 }
 
 function formatRssi(value) {
-  return value === null || value === undefined ? "-- dBm" : `${Math.round(value)} dBm`;
+  return value === null || value === undefined ? "--" : `${Math.round(value)} dBm`;
 }
 
 function formatDateTime(value) {
   if (!value) {
-    return "Sin datos";
+    return "--";
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "--";
   }
 
   return new Intl.DateTimeFormat("es-ES", {

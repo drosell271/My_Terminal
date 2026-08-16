@@ -10,7 +10,10 @@ process.env.DB_FILE = path.join(
 process.env.PUBLIC_BASE_URL = "";
 
 const {
+  getSensors,
   getDeviceSettings,
+  getWeatherLocation,
+  saveWeatherLocation,
   saveDeviceSettings,
   normalizeServerUrl,
   normalizeStoredServerUrl,
@@ -36,6 +39,37 @@ test("device timezone can be configured and falls back on invalid values", () =>
   const unchanged = saveDeviceSettings({ timezone: "Invalid/Timezone" });
   assert.equal(unchanged.timezone, "UTC");
   assert.equal(unchanged.timezonePosix, "UTC0");
+});
+
+test("sensor defaults start empty until the device posts a reading", () => {
+  const sensors = getSensors();
+
+  assert.equal(sensors.batteryPercent, null);
+  assert.equal(sensors.temperatureC, null);
+  assert.equal(sensors.humidityPercent, null);
+  assert.equal(sensors.rssi, null);
+  assert.equal(sensors.updatedAt, "");
+});
+
+test("weather units can be configured independently", () => {
+  const location = saveWeatherLocation({
+    label: "Madrid",
+    country: "ES",
+    latitude: "40,4168",
+    longitude: "-3,7038",
+    temperatureUnit: "celsius",
+    windUnit: "kmh",
+  });
+
+  assert.equal(location.temperatureUnit, "celsius");
+  assert.equal(location.windUnit, "kmh");
+  assert.equal(location.units, "metric");
+  assert.equal(location.latitude, 40.4168);
+  assert.equal(location.longitude, -3.7038);
+
+  const saved = getWeatherLocation();
+  assert.equal(saved.temperatureUnit, "celsius");
+  assert.equal(saved.windUnit, "kmh");
 });
 
 test("ICS parser applies recurrence overrides and cancellations", () => {

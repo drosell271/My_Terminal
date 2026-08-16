@@ -136,7 +136,7 @@ function EinkScreen() {
             <WeatherGlyph type={currentWeather.condition || "cloud"} size="large" />
             <div className="temperature">
               <span>{formatPlainNumber(currentWeather.temp)}</span>
-              <sup>°{currentWeather.unitSuffix || "C"}</sup>
+              <sup>{formatTemperatureSuffix(currentWeather.unitSuffix || "C")}</sup>
             </div>
           </div>
         </div>
@@ -310,7 +310,7 @@ function formatWeatherValue(value, unitSuffix = "C") {
     return `--°`;
   }
 
-  return `${Math.round(value)}°${unitSuffix}`;
+  return `${Math.round(value)}${formatTemperatureSuffix(unitSuffix)}`;
 }
 
 function formatPercent(value) {
@@ -335,6 +335,10 @@ function formatWind(value, unit = "m/s") {
   }
 
   return `${Math.round(value)} ${unit}`;
+}
+
+function formatTemperatureSuffix(unitSuffix) {
+  return unitSuffix === "K" ? "K" : `°${unitSuffix}`;
 }
 
 function buildFallbackData() {

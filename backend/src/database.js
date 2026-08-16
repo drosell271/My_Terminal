@@ -69,6 +69,8 @@ db.exec(`
     latitude REAL,
     longitude REAL,
     units TEXT NOT NULL,
+    temperature_unit TEXT NOT NULL DEFAULT 'celsius',
+    wind_unit TEXT NOT NULL DEFAULT 'ms',
     openweather_api_key TEXT NOT NULL DEFAULT '',
     updated_at TEXT NOT NULL
   );
@@ -98,10 +100,23 @@ function migrateSchema() {
     "TEXT NOT NULL DEFAULT ''",
   );
   ensureColumn(
+    "weather_location",
+    "temperature_unit",
+    "TEXT NOT NULL DEFAULT 'celsius'",
+  );
+  ensureColumn(
+    "weather_location",
+    "wind_unit",
+    "TEXT NOT NULL DEFAULT 'ms'",
+  );
+  ensureColumn(
     "device_settings",
     "timezone",
     `TEXT NOT NULL DEFAULT '${DEFAULT_TIMEZONE}'`,
   );
+
+  backfillWeatherUnitColumns();
+  clearDefaultSensorSeed();
 }
 
 function ensureColumn(tableName, columnName, definition) {
@@ -119,8 +134,8 @@ function seedDefaults() {
   db.prepare(`
     INSERT OR IGNORE INTO sensor_readings (
       id, battery_percent, temperature_c, humidity_percent, rssi, updated_at
-    ) VALUES (1, 86, 23.8, 46, -61, ?)
-  `).run(now);
+    ) VALUES (1, NULL, NULL, NULL, NULL, '')
+  `).run();
 
   db.prepare(`
     INSERT OR IGNORE INTO device_settings (
@@ -154,8 +169,8 @@ function seedDefaults() {
 
   db.prepare(`
     INSERT OR IGNORE INTO weather_location (
-      id, label, country, latitude, longitude, units, updated_at
-    ) VALUES (1, 'Madrid', 'ES', 40.4168, -3.7038, 'metric', ?)
+      id, label, country, latitude, longitude, units, temperature_unit, wind_unit, updated_at
+    ) VALUES (1, 'Madrid', 'ES', 40.4168, -3.7038, 'metric', 'celsius', 'ms', ?)
   `).run(now);
 
   db.prepare(`
@@ -163,6 +178,40 @@ function seedDefaults() {
       id, month_offset, updated_at
     ) VALUES (1, 0, ?)
   `).run(now);
+}
+
+function clearDefaultSensorSeed() {
+  db.prepare(`
+    UPDATE sensor_readings
+    SET battery_percent = NULL,
+        temperature_c = NULL,
+        humidity_percent = NULL,
+        rssi = NULL,
+        updated_at = ''
+    WHERE id = 1
+      AND battery_percent = 86
+      AND temperature_c = 23.8
+      AND humidity_percent = 46
+      AND rssi = -61
+  `).run();
+}
+
+function backfillWeatherUnitColumns() {
+  db.prepare(`
+    UPDATE weather_location
+    SET temperature_unit = CASE units
+          WHEN 'imperial' THEN 'fahrenheit'
+          WHEN 'standard' THEN 'kelvin'
+          ELSE temperature_unit
+        END,
+        wind_unit = CASE units
+          WHEN 'imperial' THEN 'mph'
+          ELSE wind_unit
+        END
+    WHERE units IN ('imperial', 'standard')
+      AND temperature_unit = 'celsius'
+      AND wind_unit = 'ms'
+  `).run();
 }
 
 function sanitizeUnsafeServerUrl() {
@@ -202,6 +251,16 @@ function getSensors() {
     FROM sensor_readings
     WHERE id = 1
   `).get();
+
+  if (!row) {
+    return {
+      batteryPercent: null,
+      temperatureC: null,
+      humidityPercent: null,
+      rssi: null,
+      updatedAt: null,
+    };
+  }
 
   return {
     batteryPercent: row.battery_percent,
@@ -427,10 +486,16 @@ function saveEventExceptions(keywords) {
 
 function getWeatherLocation(options = {}) {
   const row = db.prepare(`
-    SELECT label, country, latitude, longitude, units, openweather_api_key, updated_at
+    SELECT label, country, latitude, longitude, units, temperature_unit, wind_unit,
+           openweather_api_key, updated_at
     FROM weather_location
     WHERE id = 1
   `).get();
+  const temperatureUnit = normalizeTemperatureUnit(
+    row.temperature_unit,
+    temperatureUnitFromLegacyUnits(row.units),
+  );
+  const windUnit = normalizeWindUnit(row.wind_unit, windUnitFromLegacyUnits(row.units));
 
   const location = {
     label: row.label,
@@ -438,6 +503,8 @@ function getWeatherLocation(options = {}) {
     latitude: row.latitude,
     longitude: row.longitude,
     units: row.units,
+    temperatureUnit,
+    windUnit,
     hasOpenWeatherApiKey: Boolean(row.openweather_api_key),
     updatedAt: row.updated_at,
   };
@@ -452,14 +519,22 @@ function getWeatherLocation(options = {}) {
 function saveWeatherLocation(payload) {
   const current = getWeatherLocation({ includeSecret: true });
   const apiKey = normalizeOptionalSecret(payload.openWeatherApiKey, 160);
+  const temperatureUnit = normalizeTemperatureUnit(
+    payload.temperatureUnit,
+    payload.units ? temperatureUnitFromLegacyUnits(payload.units) : current.temperatureUnit,
+  );
+  const windUnit = normalizeWindUnit(
+    payload.windUnit,
+    payload.units ? windUnitFromLegacyUnits(payload.units) : current.windUnit,
+  );
   const next = {
     label: normalizeText(payload.label, current.label, 120),
     country: normalizeText(payload.country, current.country, 2),
     latitude: normalizeOptionalNumber(payload.latitude, -90, 90),
     longitude: normalizeOptionalNumber(payload.longitude, -180, 180),
-    units: ["metric", "imperial", "standard"].includes(payload.units)
-      ? payload.units
-      : current.units,
+    units: openWeatherUnitsForTemperature(temperatureUnit),
+    temperatureUnit,
+    windUnit,
     openWeatherApiKey: payload.clearOpenWeatherApiKey
       ? ""
       : apiKey || current.openWeatherApiKey || "",
@@ -473,6 +548,8 @@ function saveWeatherLocation(payload) {
         latitude = ?,
         longitude = ?,
         units = ?,
+        temperature_unit = ?,
+        wind_unit = ?,
         openweather_api_key = ?,
         updated_at = ?
     WHERE id = 1
@@ -482,6 +559,8 @@ function saveWeatherLocation(payload) {
     next.latitude,
     next.longitude,
     next.units,
+    next.temperatureUnit,
+    next.windUnit,
     next.openWeatherApiKey,
     next.updatedAt,
   );
@@ -708,12 +787,52 @@ function normalizeOptionalNumber(value, min, max) {
     return null;
   }
 
-  const number = Number(value);
+  const number = Number(
+    typeof value === "string" ? value.trim().replace(",", ".") : value,
+  );
   if (!Number.isFinite(number) || number < min || number > max) {
     throw new Error(`Number must be between ${min} and ${max}`);
   }
 
   return number;
+}
+
+function normalizeTemperatureUnit(value, fallback = "celsius") {
+  const unit = String(value || "").trim().toLowerCase();
+  return ["celsius", "fahrenheit", "kelvin"].includes(unit) ? unit : fallback;
+}
+
+function normalizeWindUnit(value, fallback = "ms") {
+  const unit = String(value || "").trim().toLowerCase();
+  return ["ms", "kmh", "mph"].includes(unit) ? unit : fallback;
+}
+
+function temperatureUnitFromLegacyUnits(units) {
+  if (units === "imperial") {
+    return "fahrenheit";
+  }
+
+  if (units === "standard") {
+    return "kelvin";
+  }
+
+  return "celsius";
+}
+
+function windUnitFromLegacyUnits(units) {
+  return units === "imperial" ? "mph" : "ms";
+}
+
+function openWeatherUnitsForTemperature(temperatureUnit) {
+  if (temperatureUnit === "fahrenheit") {
+    return "imperial";
+  }
+
+  if (temperatureUnit === "kelvin") {
+    return "standard";
+  }
+
+  return "metric";
 }
 
 function normalizeOptionalInteger(value, min, max) {

@@ -20,24 +20,37 @@ async function getWeatherData(location) {
     return fallback;
   }
 
-  const units = location.units || "metric";
-  const cacheKey = `weather:${lat.toFixed(4)}:${lon.toFixed(4)}:${units}:${hash(apiKey)}`;
+  const temperatureUnit = normalizeTemperatureUnit(location.temperatureUnit, location.units);
+  const windUnit = normalizeWindUnit(location.windUnit, location.units);
+  const openWeatherUnits = openWeatherUnitsForTemperature(temperatureUnit);
+  const cacheKey = [
+    "weather",
+    lat.toFixed(4),
+    lon.toFixed(4),
+    temperatureUnit,
+    windUnit,
+    hash(apiKey),
+  ].join(":");
   const cached = getCacheEntry(cacheKey);
 
   if (cached) {
-    return ensureWeatherUnits(cached, units);
+    return ensureWeatherUnits(cached, temperatureUnit, windUnit);
   }
 
   try {
     const [current, forecast] = await Promise.all([
-      fetchOpenWeather("weather", lat, lon, units, apiKey),
-      fetchOpenWeather("forecast", lat, lon, units, apiKey),
+      fetchOpenWeather("weather", lat, lon, openWeatherUnits, apiKey),
+      fetchOpenWeather("forecast", lat, lon, openWeatherUnits, apiKey),
     ]);
-    const data = normalizeWeather(current, forecast, location, units);
+    const data = normalizeWeather(current, forecast, location, {
+      temperatureUnit,
+      windUnit,
+      openWeatherUnits,
+    });
 
     return setCacheEntry(cacheKey, data, WEATHER_CACHE_TTL_MS);
   } catch (error) {
-    console.error("Could not read OpenWeather:", error);
+    console.error("Could not read OpenWeather:", error.message || error);
     return fallback;
   }
 }
@@ -63,7 +76,10 @@ async function fetchOpenWeather(endpoint, lat, lon, units, apiKey) {
     });
 
     if (!response.ok) {
-      throw new Error(`OpenWeather ${endpoint} failed with HTTP ${response.status}`);
+      const body = await response.text().catch(() => "");
+      throw new Error(
+        `OpenWeather ${endpoint} failed with HTTP ${response.status}${body ? `: ${body.slice(0, 240)}` : ""}`,
+      );
     }
 
     return response.json();
@@ -77,8 +93,8 @@ function normalizeWeather(current, forecast, location, units) {
   const todayKey = toDateKey(new Date());
   const todayForecast = forecastByDate[todayKey] || {};
   const currentCondition = current.weather?.[0] || {};
-  const unitSuffix = units === "imperial" ? "F" : units === "standard" ? "K" : "C";
-  const windUnit = units === "imperial" ? "mph" : "m/s";
+  const unitSuffix = unitSuffixFor(units.temperatureUnit);
+  const sourceWindUnit = windUnitForOpenWeather(units.openWeatherUnits);
 
   return {
     current: {
@@ -90,8 +106,8 @@ function normalizeWeather(current, forecast, location, units) {
       low: round(todayForecast.low ?? current.main?.temp_min),
       feelsLike: round(current.main?.feels_like),
       humidity: round(current.main?.humidity),
-      wind: round(current.wind?.speed),
-      windUnit,
+      wind: round(convertWind(current.wind?.speed, sourceWindUnit, units.windUnit)),
+      windUnit: windLabelFor(units.windUnit),
       rainChance: round(todayForecast.rainChance),
       unitSuffix,
     },
@@ -99,13 +115,13 @@ function normalizeWeather(current, forecast, location, units) {
   };
 }
 
-function ensureWeatherUnits(data, units) {
+function ensureWeatherUnits(data, temperatureUnit, windUnit) {
   return {
     ...data,
     current: {
       ...(data.current || {}),
-      windUnit: data.current?.windUnit || windUnitFor(units),
-      unitSuffix: data.current?.unitSuffix || unitSuffixFor(units),
+      windUnit: data.current?.windUnit || windLabelFor(windUnit),
+      unitSuffix: data.current?.unitSuffix || unitSuffixFor(temperatureUnit),
     },
   };
 }
@@ -120,7 +136,7 @@ function buildForecastByDate(forecast, units) {
       temps: [],
       pops: [],
       entries: [],
-      unitSuffix: units === "imperial" ? "F" : units === "standard" ? "K" : "C",
+      unitSuffix: unitSuffixFor(units.temperatureUnit),
     };
 
     bucket.temps.push(item.main?.temp);
@@ -196,6 +212,9 @@ function mapWeatherCondition(id) {
 }
 
 function getFallbackWeather(location) {
+  const temperatureUnit = normalizeTemperatureUnit(location.temperatureUnit, location.units);
+  const windUnit = normalizeWindUnit(location.windUnit, location.units);
+
   return {
     current: {
       city: location.label || "Ubicacion",
@@ -207,28 +226,97 @@ function getFallbackWeather(location) {
       feelsLike: null,
       humidity: null,
       wind: null,
-      windUnit: windUnitFor(location.units),
+      windUnit: windLabelFor(windUnit),
       rainChance: null,
-      unitSuffix: unitSuffixFor(location.units),
+      unitSuffix: unitSuffixFor(temperatureUnit),
     },
     forecastByDate: {},
   };
 }
 
-function unitSuffixFor(units) {
-  if (units === "imperial") {
+function normalizeTemperatureUnit(value, legacyUnits) {
+  const unit = String(value || "").trim().toLowerCase();
+  if (["celsius", "fahrenheit", "kelvin"].includes(unit)) {
+    return unit;
+  }
+
+  if (legacyUnits === "imperial") {
+    return "fahrenheit";
+  }
+
+  if (legacyUnits === "standard") {
+    return "kelvin";
+  }
+
+  return "celsius";
+}
+
+function normalizeWindUnit(value, legacyUnits) {
+  const unit = String(value || "").trim().toLowerCase();
+  if (["ms", "kmh", "mph"].includes(unit)) {
+    return unit;
+  }
+
+  return legacyUnits === "imperial" ? "mph" : "ms";
+}
+
+function unitSuffixFor(temperatureUnit) {
+  if (temperatureUnit === "fahrenheit") {
     return "F";
   }
 
-  if (units === "standard") {
+  if (temperatureUnit === "kelvin") {
     return "K";
   }
 
   return "C";
 }
 
-function windUnitFor(units) {
-  return units === "imperial" ? "mph" : "m/s";
+function openWeatherUnitsForTemperature(temperatureUnit) {
+  if (temperatureUnit === "fahrenheit") {
+    return "imperial";
+  }
+
+  if (temperatureUnit === "kelvin") {
+    return "standard";
+  }
+
+  return "metric";
+}
+
+function windUnitForOpenWeather(units) {
+  return units === "imperial" ? "mph" : "ms";
+}
+
+function windLabelFor(windUnit) {
+  if (windUnit === "kmh") {
+    return "km/h";
+  }
+
+  if (windUnit === "mph") {
+    return "mph";
+  }
+
+  return "m/s";
+}
+
+function convertWind(value, sourceUnit, targetUnit) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) {
+    return null;
+  }
+
+  const metersPerSecond = sourceUnit === "mph" ? number * 0.44704 : number;
+
+  if (targetUnit === "kmh") {
+    return metersPerSecond * 3.6;
+  }
+
+  if (targetUnit === "mph") {
+    return metersPerSecond / 0.44704;
+  }
+
+  return metersPerSecond;
 }
 
 function round(value) {
