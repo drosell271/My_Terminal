@@ -34,6 +34,105 @@ async function getCalendarEvents(calendars, exceptions, rangeStart, rangeEnd) {
   });
 }
 
+async function getCalendarDiagnostics(calendars, exceptions = []) {
+  const sourceCalendars = Array.isArray(calendars) ? calendars.slice(0, 4) : [];
+  const keywordMatchers = buildKeywordMatchers(exceptions);
+  const rangeStart = new Date();
+  rangeStart.setHours(0, 0, 0, 0);
+  const rangeEnd = addDays(rangeStart, 90);
+
+  const results = await Promise.all(
+    sourceCalendars.map((calendar, index) =>
+      diagnoseSingleCalendar(calendar, index, keywordMatchers, rangeStart, rangeEnd),
+    ),
+  );
+  const checked = results.filter((result) => result.checked).length;
+  const failed = results.filter((result) => !result.ok).length;
+
+  return {
+    ok: checked > 0 && failed === 0,
+    checkedAt: new Date().toISOString(),
+    rangeDays: 90,
+    checked,
+    failed,
+    calendars: results,
+  };
+}
+
+async function diagnoseSingleCalendar(calendar, index, keywordMatchers, rangeStart, rangeEnd) {
+  const name = String(calendar?.name || `Calendario ${index + 1}`).trim();
+  const url = String(calendar?.url || "").trim();
+  const enabled = calendar?.enabled !== false;
+
+  if (!enabled) {
+    return {
+      ok: true,
+      checked: false,
+      status: "skipped",
+      name,
+      message: "Desactivado",
+      eventCount: 0,
+      nextEvents: [],
+    };
+  }
+
+  if (!url) {
+    return {
+      ok: false,
+      checked: false,
+      status: "missing-url",
+      name,
+      message: "Falta URL ICS",
+      eventCount: 0,
+      nextEvents: [],
+    };
+  }
+
+  try {
+    const normalizedCalendar = {
+      id: calendar?.id || `calendar-${index + 1}`,
+      name,
+      url,
+      color: calendar?.color || "#000000",
+      enabled: true,
+    };
+    const icsText = await fetchIcs(url);
+    const events = parseIcsEvents(
+      icsText,
+      normalizedCalendar,
+      keywordMatchers,
+      rangeStart,
+      rangeEnd,
+    );
+
+    return {
+      ok: true,
+      checked: true,
+      status: events.length ? "ok" : "empty",
+      name,
+      message: events.length
+        ? `${events.length} eventos en los proximos 90 dias`
+        : "ICS valido, sin eventos proximos",
+      eventCount: events.length,
+      nextEvents: events.slice(0, 3).map((event) => ({
+        title: event.title,
+        startsAt: event.startsAt,
+        allDay: event.allDay,
+      })),
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      checked: true,
+      status: "error",
+      name,
+      message: error?.message || String(error),
+      eventCount: 0,
+      nextEvents: [],
+    };
+  }
+}
+
 async function getSingleCalendarEvents(calendar, keywordMatchers, rangeStart, rangeEnd) {
   const cacheKey = `ics:${calendar.id}:${hash(calendar.url)}`;
   const cached = getCacheEntry(cacheKey);
@@ -301,7 +400,10 @@ async function fetchIcs(url) {
     });
 
     if (!response.ok) {
-      throw new Error(`ICS request failed with HTTP ${response.status}`);
+      const body = await response.text().catch(() => "");
+      throw new Error(
+        `ICS request failed with HTTP ${response.status}${body ? `: ${body.slice(0, 240)}` : ""}`,
+      );
     }
 
     return response.text();
@@ -347,6 +449,7 @@ function sortEvents(a, b) {
 
 module.exports = {
   getCalendarEvents,
+  getCalendarDiagnostics,
   parseIcsEvents,
   toDateKey,
 };

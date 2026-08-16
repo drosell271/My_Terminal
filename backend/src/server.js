@@ -33,6 +33,8 @@ const {
   setScreenMonthOffset,
 } = require("./database");
 const { getEinkData } = require("./eink-data-service");
+const { getCalendarDiagnostics } = require("./ics-service");
+const { getWeatherDiagnostics } = require("./weather-service");
 
 const PORT = Number(process.env.PORT || 3000);
 const EINK_WIDTH = 800;
@@ -134,6 +136,22 @@ app.put("/api/calendars", requireAdmin, (req, res, next) => {
   sendJson(res, next, () => saveCalendars((req.body || {}).calendars || []));
 });
 
+app.post("/api/calendars/test", requireAdmin, async (req, res, next) => {
+  try {
+    const payload = req.body || {};
+    const calendars = Array.isArray(payload.calendars)
+      ? payload.calendars
+      : getCalendars();
+    const exceptions = Array.isArray(payload.keywords)
+      ? payload.keywords
+      : getEventExceptions();
+
+    res.json(await getCalendarDiagnostics(calendars, exceptions));
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.get("/api/event-exceptions", requireAdmin, (_req, res, next) => {
   sendJson(res, next, getEventExceptions);
 });
@@ -148,6 +166,32 @@ app.get("/api/weather/location", requireAdmin, (_req, res, next) => {
 
 app.put("/api/weather/location", requireAdmin, (req, res, next) => {
   sendJson(res, next, () => saveWeatherLocation(req.body || {}));
+});
+
+app.get("/api/weather/test", requireAdmin, async (_req, res, next) => {
+  try {
+    res.json(await getWeatherDiagnostics(getWeatherLocation({ includeSecret: true })));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/weather/test", requireAdmin, async (req, res, next) => {
+  try {
+    const current = getWeatherLocation({ includeSecret: true });
+    const payload = req.body || {};
+    const location = {
+      ...current,
+      ...payload,
+      openWeatherApiKey: payload.clearOpenWeatherApiKey
+        ? ""
+        : payload.openWeatherApiKey || current.openWeatherApiKey,
+    };
+
+    res.json(await getWeatherDiagnostics(location));
+  } catch (error) {
+    next(error);
+  }
 });
 
 app.get(["/", "/eink", "/control"], (_req, res) => {

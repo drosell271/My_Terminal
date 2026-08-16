@@ -16,6 +16,7 @@ import "./App.css";
 import ControlPanel from "./ControlPanel.jsx";
 
 const API_BASE = window.location.port === "5173" ? "http://127.0.0.1:3000" : "";
+const ADMIN_TOKEN_STORAGE_KEY = "my-terminal.adminToken";
 
 export default function App() {
   const path = window.location.pathname;
@@ -34,7 +35,10 @@ function EinkScreen() {
     let ignore = false;
 
     fetch(`${API_BASE}/api/eink-data`, {
-      headers: { Accept: "application/json" },
+      headers: {
+        Accept: "application/json",
+        ...authHeaders(),
+      },
     })
       .then((response) => {
         if (!response.ok) {
@@ -207,6 +211,15 @@ function CalendarLegend({ calendars }) {
       ))}
     </div>
   );
+}
+
+function authHeaders() {
+  try {
+    const adminToken = window.localStorage.getItem(ADMIN_TOKEN_STORAGE_KEY);
+    return adminToken ? { "X-Admin-Token": adminToken } : {};
+  } catch (_error) {
+    return {};
+  }
 }
 
 function WeatherGlyph({ type, size }) {

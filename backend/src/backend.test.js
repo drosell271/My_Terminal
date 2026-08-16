@@ -18,7 +18,7 @@ const {
   normalizeServerUrl,
   normalizeStoredServerUrl,
 } = require("./database");
-const { parseIcsEvents } = require("./ics-service");
+const { getCalendarDiagnostics, parseIcsEvents } = require("./ics-service");
 
 test("device settings do not publish loopback URLs by default", () => {
   const settings = getDeviceSettings();
@@ -160,6 +160,67 @@ test("ICS parser filters titles by configured keywords", () => {
   assert.deepEqual(events.map((event) => event.title), ["Reunion"]);
 });
 
+test("calendar diagnostics reports missing URLs", async () => {
+  const result = await getCalendarDiagnostics([
+    {
+      id: "cal-1",
+      name: "Daniel",
+      url: "",
+      color: "#0000FF",
+      enabled: true,
+    },
+  ]);
+
+  assert.equal(result.ok, false);
+  assert.equal(result.failed, 1);
+  assert.equal(result.calendars[0].status, "missing-url");
+});
+
+test("calendar diagnostics reads valid ICS feeds", async () => {
+  const originalFetch = global.fetch;
+  const startsAt = new Date();
+  startsAt.setUTCDate(startsAt.getUTCDate() + 1);
+  startsAt.setUTCHours(9, 0, 0, 0);
+  const endsAt = new Date(startsAt.getTime() + 60 * 60 * 1000);
+  const ics = [
+    "BEGIN:VCALENDAR",
+    "VERSION:2.0",
+    "PRODID:-//My Terminal//Tests//EN",
+    "BEGIN:VEVENT",
+    "UID:diagnostic-1",
+    `DTSTART:${formatIcsUtc(startsAt)}`,
+    `DTEND:${formatIcsUtc(endsAt)}`,
+    "SUMMARY:Prueba calendario",
+    "END:VEVENT",
+    "END:VCALENDAR",
+  ].join("\r\n");
+
+  global.fetch = async () =>
+    new Response(ics, {
+      status: 200,
+      headers: { "Content-Type": "text/calendar" },
+    });
+
+  try {
+    const result = await getCalendarDiagnostics([
+      {
+        id: "cal-1",
+        name: "Daniel",
+        url: "https://example.test/calendar.ics",
+        color: "#0000FF",
+        enabled: true,
+      },
+    ]);
+
+    assert.equal(result.ok, true);
+    assert.equal(result.checked, 1);
+    assert.equal(result.calendars[0].status, "ok");
+    assert.equal(result.calendars[0].eventCount, 1);
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
 test("auth middleware enforces admin and device tokens when configured", () => {
   process.env.ADMIN_TOKEN = "admin-test-token";
   process.env.DEVICE_TOKEN = "device-test-token";
@@ -213,4 +274,11 @@ function runMiddleware(middleware, req) {
   });
 
   return result;
+}
+
+function formatIcsUtc(date) {
+  return date
+    .toISOString()
+    .replace(/[-:]/g, "")
+    .replace(/\.\d{3}Z$/, "Z");
 }

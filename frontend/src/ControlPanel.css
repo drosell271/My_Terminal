@@ -334,11 +334,80 @@
   align-self: end;
 }
 
+.calendar-test {
+  margin-top: 10px;
+  border: 1px solid #aaa;
+  border-radius: 6px;
+  padding: 9px 10px;
+  background: #fff;
+  color: #111;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.calendar-test--ok {
+  border-color: #008000;
+}
+
+.calendar-test--error {
+  border-color: #c00000;
+}
+
+.calendar-test > strong,
+.calendar-test > span {
+  display: inline-block;
+  margin-right: 10px;
+}
+
+.calendar-test ul {
+  display: grid;
+  gap: 5px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.calendar-test li {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr);
+  gap: 8px;
+  min-width: 0;
+}
+
+.calendar-test li span {
+  min-width: 0;
+  overflow: hidden;
+  color: #555;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .exception-count {
   margin: 8px 0 0;
   color: #555;
   font-size: 12px;
   font-weight: 800;
+}
+
+.weather-test {
+  margin: 10px 0 0;
+  border: 1px solid #aaa;
+  border-radius: 6px;
+  padding: 8px 10px;
+  background: #fff;
+  color: #111;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.weather-test--ok {
+  border-color: #008000;
+}
+
+.weather-test--error {
+  border-color: #c00000;
+  color: #c00000;
 }
 
 .icon-button,

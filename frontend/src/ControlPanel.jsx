@@ -71,6 +71,10 @@ export default function ControlPanel() {
   const [exceptionText, setExceptionText] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState("");
+  const [testingWeather, setTestingWeather] = useState(false);
+  const [weatherTest, setWeatherTest] = useState(null);
+  const [testingCalendars, setTestingCalendars] = useState(false);
+  const [calendarTest, setCalendarTest] = useState(null);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
 
@@ -130,6 +134,7 @@ export default function ControlPanel() {
     await save("calendars", "/api/calendars", { calendars: assignCalendarColors(calendars) }, (data) => {
       setDashboard((current) => ({ ...current, calendars: data }));
       setCalendars(assignCalendarColors(data));
+      setCalendarTest(null);
     });
   }
 
@@ -149,7 +154,64 @@ export default function ControlPanel() {
     await save("weather", "/api/weather/location", weatherLocation, (data) => {
       setDashboard((current) => ({ ...current, weatherLocation: data }));
       setWeatherLocation({ ...data, openWeatherApiKey: "" });
+      setWeatherTest(null);
     });
+  }
+
+  async function testWeather() {
+    setTestingWeather(true);
+    setError("");
+
+    try {
+      const data = await api("/api/weather/test", {
+        method: "POST",
+        body: JSON.stringify(weatherLocation),
+      });
+      setWeatherTest(data);
+      setNotice(data.ok ? "Meteorologia OK" : "Meteorologia con error");
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setTestingWeather(false);
+    }
+  }
+
+  async function clearWeatherApiKey() {
+    await save(
+      "weather",
+      "/api/weather/location",
+      {
+        ...weatherLocation,
+        openWeatherApiKey: "",
+        clearOpenWeatherApiKey: true,
+      },
+      (data) => {
+        setDashboard((current) => ({ ...current, weatherLocation: data }));
+        setWeatherLocation({ ...data, openWeatherApiKey: "" });
+        setWeatherTest(null);
+      },
+    );
+  }
+
+  async function testCalendars() {
+    setTestingCalendars(true);
+    setError("");
+
+    try {
+      const data = await api("/api/calendars/test", {
+        method: "POST",
+        body: JSON.stringify({
+          calendars: assignCalendarColors(calendars),
+          keywords: exceptionKeywords,
+        }),
+      });
+      setCalendarTest(data);
+      setNotice(data.ok ? "Calendarios OK" : "Calendarios con error");
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setTestingCalendars(false);
+    }
   }
 
   async function save(section, endpoint, payload, onSuccess) {
@@ -408,11 +470,22 @@ export default function ControlPanel() {
             icon={CloudSun}
             title="Meteorologia"
             action={
-              <SaveButton
-                busy={saving === "weather"}
-                label="Guardar"
-                onClick={saveWeatherLocation}
-              />
+              <div className="button-row">
+                <button
+                  className="icon-button"
+                  type="button"
+                  onClick={testWeather}
+                  disabled={testingWeather}
+                >
+                  <CloudSun size={16} />
+                  {testingWeather ? "Probando" : "Probar"}
+                </button>
+                <SaveButton
+                  busy={saving === "weather"}
+                  label="Guardar"
+                  onClick={saveWeatherLocation}
+                />
+              </div>
             }
           />
 
@@ -471,7 +544,27 @@ export default function ControlPanel() {
               placeholder={weatherLocation.hasOpenWeatherApiKey ? "Configurada" : ""}
               onChange={(value) => updateWeatherLocation("openWeatherApiKey", value)}
             />
+            {weatherLocation.hasOpenWeatherApiKey ? (
+              <button
+                className="icon-button field--full"
+                type="button"
+                onClick={clearWeatherApiKey}
+                disabled={saving === "weather"}
+              >
+                Borrar key guardada
+              </button>
+            ) : null}
           </div>
+          {weatherTest ? (
+            <p
+              className={[
+                "weather-test",
+                weatherTest.ok ? "weather-test--ok" : "weather-test--error",
+              ].join(" ")}
+            >
+              {formatWeatherTest(weatherTest)}
+            </p>
+          ) : null}
         </section>
 
         <section className="control-section control-section--wide">
@@ -488,6 +581,15 @@ export default function ControlPanel() {
                 >
                   <Plus size={16} />
                   Añadir
+                </button>
+                <button
+                  className="icon-button"
+                  type="button"
+                  onClick={testCalendars}
+                  disabled={testingCalendars}
+                >
+                  <CalendarDays size={16} />
+                  {testingCalendars ? "Probando" : "Probar"}
                 </button>
                 <SaveButton
                   busy={saving === "calendars"}
@@ -533,6 +635,7 @@ export default function ControlPanel() {
               </div>
             ))}
           </div>
+          {calendarTest ? <CalendarTestResult result={calendarTest} /> : null}
         </section>
 
         <section className="control-section">
@@ -584,6 +687,32 @@ function SensorMetric({ icon: Icon, label, value, detail }) {
         <small>{detail}</small>
       </div>
     </article>
+  );
+}
+
+function CalendarTestResult({ result }) {
+  const calendars = result.calendars || [];
+
+  return (
+    <div
+      className={[
+        "calendar-test",
+        result.ok ? "calendar-test--ok" : "calendar-test--error",
+      ].join(" ")}
+    >
+      <strong>{result.ok ? "Calendarios OK" : "Calendarios con error"}</strong>
+      <span>
+        {result.checked || 0} comprobados · {result.failed || 0} con error
+      </span>
+      <ul>
+        {calendars.map((calendar, index) => (
+          <li key={`${calendar.name}-${index}`}>
+            <b>{calendar.name}</b>
+            <span>{formatCalendarDiagnostic(calendar)}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 
@@ -763,6 +892,42 @@ function formatDateTime(value) {
     hour: "2-digit",
     minute: "2-digit",
   }).format(new Date(value));
+}
+
+function formatWeatherTest(result) {
+  if (!result) {
+    return "";
+  }
+
+  const source = result.apiKeySource === "stored" ? "panel" : result.apiKeySource === "env" ? ".env" : "sin key";
+
+  if (!result.ok) {
+    return `${source}: ${result.message || result.reason || "error"}`;
+  }
+
+  const current = result.current || {};
+  return `${source}: ${current.city || "OK"} ${formatWeatherTemperature(current.temp, current.unitSuffix)}, viento ${formatWind(current.wind, current.windUnit)}`;
+}
+
+function formatCalendarDiagnostic(calendar) {
+  const next = (calendar.nextEvents || [])[0];
+  const suffix = next
+    ? ` · proximo: ${next.allDay ? "todo el dia" : formatDateTime(next.startsAt)} ${next.title}`
+    : "";
+
+  return `${calendar.message || calendar.status || "sin datos"}${suffix}`;
+}
+
+function formatWind(value, unit = "m/s") {
+  return value === null || value === undefined ? "--" : `${Math.round(value)} ${unit}`;
+}
+
+function formatWeatherTemperature(value, unitSuffix = "C") {
+  if (value === null || value === undefined) {
+    return "--";
+  }
+
+  return unitSuffix === "K" ? `${Math.round(value)}K` : `${Math.round(value)}°${unitSuffix}`;
 }
 
 function assignCalendarColors(calendars) {

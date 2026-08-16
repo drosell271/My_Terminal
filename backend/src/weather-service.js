@@ -7,52 +7,129 @@ const REQUEST_TIMEOUT_MS = 12_000;
 
 async function getWeatherData(location) {
   const fallback = getFallbackWeather(location);
-  const apiKey = location.openWeatherApiKey || process.env.OPENWEATHER_API_KEY;
+  const config = buildWeatherRequestConfig(location);
 
-  if (!apiKey || !location.latitude || !location.longitude) {
+  if (!config.ok) {
     return fallback;
   }
 
-  const lat = Number(location.latitude);
-  const lon = Number(location.longitude);
-
-  if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
-    return fallback;
-  }
-
-  const temperatureUnit = normalizeTemperatureUnit(location.temperatureUnit, location.units);
-  const windUnit = normalizeWindUnit(location.windUnit, location.units);
-  const openWeatherUnits = openWeatherUnitsForTemperature(temperatureUnit);
   const cacheKey = [
     "weather",
-    lat.toFixed(4),
-    lon.toFixed(4),
-    temperatureUnit,
-    windUnit,
-    hash(apiKey),
+    config.lat.toFixed(4),
+    config.lon.toFixed(4),
+    config.temperatureUnit,
+    config.windUnit,
+    hash(config.apiKey),
   ].join(":");
   const cached = getCacheEntry(cacheKey);
 
   if (cached) {
-    return ensureWeatherUnits(cached, temperatureUnit, windUnit);
+    return ensureWeatherUnits(cached, config.temperatureUnit, config.windUnit);
   }
 
   try {
     const [current, forecast] = await Promise.all([
-      fetchOpenWeather("weather", lat, lon, openWeatherUnits, apiKey),
-      fetchOpenWeather("forecast", lat, lon, openWeatherUnits, apiKey),
+      fetchOpenWeather("weather", config.lat, config.lon, config.openWeatherUnits, config.apiKey),
+      fetchOpenWeather("forecast", config.lat, config.lon, config.openWeatherUnits, config.apiKey),
     ]);
     const data = normalizeWeather(current, forecast, location, {
-      temperatureUnit,
-      windUnit,
-      openWeatherUnits,
+      temperatureUnit: config.temperatureUnit,
+      windUnit: config.windUnit,
+      openWeatherUnits: config.openWeatherUnits,
     });
 
     return setCacheEntry(cacheKey, data, WEATHER_CACHE_TTL_MS);
   } catch (error) {
-    console.error("Could not read OpenWeather:", error.message || error);
+    console.error("Could not read OpenWeather:", describeError(error));
     return fallback;
   }
+}
+
+async function getWeatherDiagnostics(location) {
+  const config = buildWeatherRequestConfig(location);
+
+  if (!config.ok) {
+    return {
+      ok: false,
+      reason: config.reason,
+      message: config.message,
+      apiKeySource: config.apiKeySource,
+      hasCoordinates: Boolean(config.hasCoordinates),
+      checkedAt: new Date().toISOString(),
+    };
+  }
+
+  try {
+    const [current, forecast] = await Promise.all([
+      fetchOpenWeather("weather", config.lat, config.lon, config.openWeatherUnits, config.apiKey),
+      fetchOpenWeather("forecast", config.lat, config.lon, config.openWeatherUnits, config.apiKey),
+    ]);
+    const normalized = normalizeWeather(current, forecast, location, {
+      temperatureUnit: config.temperatureUnit,
+      windUnit: config.windUnit,
+      openWeatherUnits: config.openWeatherUnits,
+    });
+
+    return {
+      ok: true,
+      apiKeySource: config.apiKeySource,
+      checkedAt: new Date().toISOString(),
+      current: normalized.current,
+      forecastDays: Object.keys(normalized.forecastByDate).length,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      reason: "OPENWEATHER_ERROR",
+      message: describeError(error),
+      apiKeySource: config.apiKeySource,
+      checkedAt: new Date().toISOString(),
+    };
+  }
+}
+
+function buildWeatherRequestConfig(location) {
+  const storedApiKey = String(location.openWeatherApiKey || "").trim();
+  const envApiKey = String(process.env.OPENWEATHER_API_KEY || "").trim();
+  const apiKey = storedApiKey || envApiKey;
+  const lat = parseCoordinate(location.latitude);
+  const lon = parseCoordinate(location.longitude);
+  const hasCoordinates = Number.isFinite(lat) && Number.isFinite(lon);
+  const temperatureUnit = normalizeTemperatureUnit(location.temperatureUnit, location.units);
+  const windUnit = normalizeWindUnit(location.windUnit, location.units);
+  const openWeatherUnits = openWeatherUnitsForTemperature(temperatureUnit);
+
+  if (!apiKey) {
+    return {
+      ok: false,
+      reason: "MISSING_API_KEY",
+      message: "No hay API key de OpenWeather configurada",
+      apiKeySource: "none",
+      hasCoordinates,
+    };
+  }
+
+  if (!hasCoordinates) {
+    return {
+      ok: false,
+      reason: "INVALID_COORDINATES",
+      message: "Latitud o longitud no validas",
+      apiKeySource: storedApiKey ? "stored" : "env",
+      hasCoordinates: false,
+    };
+  }
+
+  return {
+    ok: true,
+    apiKey,
+    apiKeySource: storedApiKey ? "stored" : "env",
+    lat,
+    lon,
+    hasCoordinates,
+    temperatureUnit,
+    windUnit,
+    openWeatherUnits,
+  };
 }
 
 async function fetchOpenWeather(endpoint, lat, lon, units, apiKey) {
@@ -333,6 +410,17 @@ function hash(value) {
   return createHash("sha1").update(String(value)).digest("hex").slice(0, 12);
 }
 
+function describeError(error) {
+  const message = error?.message || String(error);
+  const cause = error?.cause?.message ? `: ${error.cause.message}` : "";
+  return `${message}${cause}`;
+}
+
+function parseCoordinate(value) {
+  return Number(typeof value === "string" ? value.trim().replace(",", ".") : value);
+}
+
 module.exports = {
   getWeatherData,
+  getWeatherDiagnostics,
 };
