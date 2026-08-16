@@ -3,7 +3,7 @@
 El stack guarda los datos persistentes en:
 
 ```text
-/home/daniel/docker/my_terminal
+/home/daniel/docker/my_terminal/data
 ```
 
 Dentro del contenedor esa carpeta se monta como `/data`, y la base SQLite queda en:
@@ -17,7 +17,7 @@ Dentro del contenedor esa carpeta se monta como `/data`, y la base SQLite queda 
 1. Crea la carpeta en el host:
 
 ```bash
-mkdir -p /home/daniel/docker/my_terminal
+mkdir -p /home/daniel/docker/my_terminal/data
 ```
 
 2. Crea las variables del stack o un `.env` junto al `docker-compose.yml`:
@@ -65,7 +65,7 @@ El volumen configurado es:
 
 ```yaml
 volumes:
-  - /home/daniel/docker/my_terminal:/data
+  - /home/daniel/docker/my_terminal/data:/data
 ```
 
 Si haces copia de seguridad de esa carpeta, conservas configuracion, calendarios, API key, sensores y cache.
