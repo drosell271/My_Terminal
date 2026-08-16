@@ -4,6 +4,7 @@ services:
       context: .
       dockerfile: Dockerfile
     image: my-terminal:latest
+    pull_policy: build
     container_name: my_terminal
     restart: unless-stopped
     ports:
