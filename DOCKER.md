@@ -16,18 +16,31 @@ Dentro del contenedor `data` se monta como `/data`, y la base SQLite queda en:
 
 ## Portainer
 
-1. Crea las carpetas en el host:
+### Opcion recomendada: Repository/Git
+
+Esta opcion mantiene el control completo desde Portainer: deploy, redeploy, logs, variables y rebuild. Portainer clonara el repo en su almacenamiento interno y construira desde el contexto `.`.
+
+1. Crea solo la carpeta persistente en el host:
 
 ```bash
 mkdir -p /home/daniel/docker/my_terminal/data
-cd /home/daniel/docker/my_terminal
-git clone TU_REPO app
 ```
 
-2. En Portainer, crea un stack con `docker-compose.yml` y define estas variables:
+2. En Portainer ve a `Stacks -> Add stack`.
+
+3. Elige `Repository` o `Git repository`.
+
+4. Configura:
+
+```text
+Repository URL: TU_REPO
+Branch: main
+Compose path: docker-compose.yml
+```
+
+5. Define estas variables:
 
 ```env
-APP_PATH=/home/daniel/docker/my_terminal/app
 DATA_PATH=/home/daniel/docker/my_terminal/data
 PORT=3002
 TZ=Europe/Madrid
@@ -42,13 +55,13 @@ PUPPETEER_CACHE_DIR=/app/.cache/puppeteer
 
 Si defines `DEVICE_TOKEN`, pon el mismo valor en el portal WiFi de la pantalla.
 
-3. Despliega el stack. El servicio publica:
+6. Despliega el stack. El servicio publica:
 
 ```text
 http://IP_DEL_SERVIDOR:3002
 ```
 
-4. En el panel de control, comprueba que `Servidor backend` usa la URL real de la maquina Docker, por ejemplo:
+7. En el panel de control, comprueba que `Servidor backend` usa la URL real de la maquina Docker, por ejemplo:
 
 ```text
 http://IP_DEL_SERVIDOR:3002

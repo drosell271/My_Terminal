@@ -1,7 +1,7 @@
 services:
   my-terminal:
     build:
-      context: ${APP_PATH:-.}
+      context: .
       dockerfile: Dockerfile
     image: my-terminal:latest
     container_name: my_terminal
