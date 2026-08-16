@@ -347,7 +347,7 @@ function formatWind(value, unit = "m/s") {
     return "--";
   }
 
-  return `${Math.round(value)} ${unit}`;
+  return `${Math.round(value)}${unit}`;
 }
 
 function formatTemperatureSuffix(unitSuffix) {
