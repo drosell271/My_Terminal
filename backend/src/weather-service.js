@@ -175,7 +175,7 @@ function normalizeWeather(current, forecast, location, units) {
 
   return {
     current: {
-      city: current.name || location.label || "Ubicacion",
+      city: location.label || current.name || "Ubicacion",
       temp: round(current.main?.temp),
       condition: mapWeatherCondition(currentCondition.id),
       summary: capitalize(currentCondition.description || "Sin datos"),

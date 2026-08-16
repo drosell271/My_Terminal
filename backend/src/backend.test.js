@@ -19,6 +19,7 @@ const {
   normalizeStoredServerUrl,
 } = require("./database");
 const { getCalendarDiagnostics, parseIcsEvents } = require("./ics-service");
+const { getWeatherDiagnostics } = require("./weather-service");
 
 test("device settings do not publish loopback URLs by default", () => {
   const settings = getDeviceSettings();
@@ -70,6 +71,42 @@ test("weather units can be configured independently", () => {
   const saved = getWeatherLocation();
   assert.equal(saved.temperatureUnit, "celsius");
   assert.equal(saved.windUnit, "kmh");
+});
+
+test("weather label overrides OpenWeather location name", async () => {
+  const originalFetch = global.fetch;
+  global.fetch = async (url) => {
+    const endpoint = String(url).includes("/forecast") ? "forecast" : "weather";
+    const body = endpoint === "forecast"
+      ? { list: [] }
+      : {
+          name: "Madrid City Center",
+          main: { temp: 20, feels_like: 19, humidity: 50, temp_max: 22, temp_min: 18 },
+          wind: { speed: 3 },
+          weather: [{ id: 800, description: "cielo claro" }],
+        };
+
+    return new Response(JSON.stringify(body), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  };
+
+  try {
+    const result = await getWeatherDiagnostics({
+      label: "Madrid",
+      latitude: 40.4168,
+      longitude: -3.7038,
+      temperatureUnit: "celsius",
+      windUnit: "ms",
+      openWeatherApiKey: "test-key",
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.current.city, "Madrid");
+  } finally {
+    global.fetch = originalFetch;
+  }
 });
 
 test("ICS parser applies recurrence overrides and cancellations", () => {
