@@ -16,6 +16,7 @@
 static const char *TAG = "buttons";
 static QueueHandle_t s_button_queue;
 static button_action_callback_t s_callback;
+static int64_t s_last_press_us[3];
 
 static void IRAM_ATTR button_isr_handler(void *arg)
 {
@@ -43,27 +44,13 @@ static bool action_from_gpio(gpio_num_t gpio, button_action_t *action)
 static void button_task(void *arg)
 {
     (void)arg;
-    int64_t last_press_us[3] = {0};
 
     while (true) {
-        gpio_num_t gpio;
-        if (xQueueReceive(s_button_queue, &gpio, portMAX_DELAY) != pdTRUE) {
-            continue;
-        }
-
         button_action_t action;
-        if (!action_from_gpio(gpio, &action)) {
+        if (!buttons_wait_for_action(&action, portMAX_DELAY)) {
             continue;
         }
 
-        int index = (int)action;
-        int64_t now = esp_timer_get_time();
-        if (now - last_press_us[index] < DEBOUNCE_US) {
-            continue;
-        }
-        last_press_us[index] = now;
-
-        ESP_LOGI(TAG, "Button action %d", action);
         if (s_callback) {
             s_callback(action);
         }
@@ -86,9 +73,14 @@ static esp_err_t configure_button(gpio_num_t gpio)
 esp_err_t buttons_init(button_action_callback_t callback)
 {
     s_callback = callback;
-    s_button_queue = xQueueCreate(8, sizeof(gpio_num_t));
+
     if (!s_button_queue) {
-        return ESP_ERR_NO_MEM;
+        s_button_queue = xQueueCreate(8, sizeof(gpio_num_t));
+        if (!s_button_queue) {
+            return ESP_ERR_NO_MEM;
+        }
+    } else {
+        xQueueReset(s_button_queue);
     }
 
     esp_err_t err = gpio_install_isr_service(0);
@@ -100,6 +92,60 @@ esp_err_t buttons_init(button_action_callback_t callback)
     ESP_ERROR_CHECK(configure_button(BUTTON_NEXT_GPIO));
     ESP_ERROR_CHECK(configure_button(BUTTON_PREVIOUS_GPIO));
 
+    if (!s_callback) {
+        return ESP_OK;
+    }
+
     BaseType_t task = xTaskCreate(button_task, "button_task", 4096, NULL, 8, NULL);
     return task == pdPASS ? ESP_OK : ESP_ERR_NO_MEM;
+}
+
+bool buttons_wait_for_action(button_action_t *action, uint32_t timeout_ms)
+{
+    if (!s_button_queue || !action) {
+        return false;
+    }
+
+    TickType_t timeout_ticks = timeout_ms == portMAX_DELAY ? portMAX_DELAY : pdMS_TO_TICKS(timeout_ms);
+    TickType_t started = xTaskGetTickCount();
+
+    while (true) {
+        gpio_num_t gpio;
+        if (xQueueReceive(s_button_queue, &gpio, timeout_ticks) != pdTRUE) {
+            return false;
+        }
+
+        if (!action_from_gpio(gpio, action)) {
+            continue;
+        }
+
+        int index = (int)*action;
+        int64_t now = esp_timer_get_time();
+        if (now - s_last_press_us[index] >= DEBOUNCE_US) {
+            s_last_press_us[index] = now;
+            ESP_LOGI(TAG, "Button action %d", *action);
+            return true;
+        }
+
+        if (timeout_ms == portMAX_DELAY) {
+            continue;
+        }
+
+        TickType_t elapsed = xTaskGetTickCount() - started;
+        if (elapsed >= pdMS_TO_TICKS(timeout_ms)) {
+            return false;
+        }
+        timeout_ticks = pdMS_TO_TICKS(timeout_ms) - elapsed;
+    }
+}
+
+void buttons_clear_pending(void)
+{
+    if (!s_button_queue) {
+        return;
+    }
+
+    gpio_num_t gpio;
+    while (xQueueReceive(s_button_queue, &gpio, 0) == pdTRUE) {
+    }
 }

@@ -12,21 +12,28 @@ Firmware para el patrón `headless browser` del proyecto:
 - Aplica la zona horaria recibida en los ajustes para calcular las horas de despertar.
 - Envía sensores al backend con `POST /api/device/sensors`.
 - Si el backend define `DEVICE_TOKEN`, el mismo token debe configurarse en el portal WiFi. El firmware lo enviara como `X-Device-Token`.
-- Publica sensores por MQTT usando los ajustes recibidos del backend.
+- Publica sensores por MQTT usando los ajustes recibidos del backend:
+  - `<topic_base>/deviceId`
+  - `<topic_base>/battery/percent`
+  - `<topic_base>/battery/voltage`
+  - `<topic_base>/temp`
+  - `<topic_base>/hum`
+  - `<topic_base>/rssi`
 - Entra en deep sleep despues de cada actualizacion y despierta por temporizador o por cualquier boton.
 - Botones:
   - GPIO5: beep corto, mes anterior, llama `POST /api/screen/month/previous`.
   - GPIO4: beep corto, mes siguiente, llama `POST /api/screen/month/next`.
   - GPIO3 verde: doble beep corto, vuelve al mes actual, llama `POST /api/screen/month/current`.
+  - Tras completar una accion de boton, mantiene una ventana interactiva de 60 segundos para poder pulsar otro boton sin esperar a que despierte. Cada pulsacion reinicia esos 60 segundos.
 - Mantener los tres botones pulsados al arrancar borra WiFi/servidor y vuelve al portal.
 
 ## Build
 
-En esta maquina ESP-IDF esta instalado en `C:\esp\v6.0\esp-idf`. Desde PowerShell:
+Este proyecto esta orientado a ESP-IDF `v5.4.4`. En esta maquina ESP-IDF esta instalado en `C:\esp\v5.4.4\esp-idf`. Desde PowerShell:
 
 ```powershell
 $env:Path = "C:\Users\drmor\.local\bin;$env:Path"
-. C:\esp\v6.0\esp-idf\export.ps1
+. C:\esp\v5.4.4\esp-idf\export.ps1
 cd firmware
 idf.py set-target esp32s3
 idf.py build
@@ -37,6 +44,8 @@ Tambien puedes usar el script local:
 ```powershell
 .\idf-build.ps1
 ```
+
+Los scripts locales prefieren `C:\esp\v5.4.4\esp-idf`. Si necesitas otra ruta, define `MY_TERMINAL_IDF_PATH`.
 
 El build genera `build/eink_e1002_firmware.bin`.
 
@@ -88,7 +97,7 @@ Basado en documentación y ejemplos públicos del reTerminal E1002:
 
 ## Driver e-paper
 
-El proyecto usa una copia local de `tuanpmt/esp_epaper`, que declara soporte para `GDEP073E01`, 800x480, 6 colores. La integracion LVGL se ha desactivado en esta copia porque la UI final se renderiza en el backend y ESP-IDF 6.0 estaba arrastrando codigo `esp_lcd` innecesario. El backend entrega BMP 24-bit y el firmware lo convierte a 4 bpp usando la paleta:
+El proyecto usa una copia local de `tuanpmt/esp_epaper`, que declara soporte para `GDEP073E01`, 800x480, 6 colores. La integracion LVGL se ha desactivado en esta copia porque la UI final se renderiza en el backend. El backend entrega BMP 24-bit y el firmware lo convierte a 4 bpp usando la paleta:
 
 - negro `0x00`
 - blanco `0x01`
@@ -109,4 +118,4 @@ El firmware usa deep sleep entre actualizaciones. Antes de dormir:
 - configura wake externo por GPIO3, GPIO4 o GPIO5 en nivel bajo;
 - apaga MQTT/WiFi y deja la e-paper en reposo.
 
-Al despertar por boton, el firmware arranca, conecta WiFi, aplica la accion de mes correspondiente y refresca la pantalla.
+Al despertar por boton, el firmware arranca, conecta WiFi, aplica la accion de mes correspondiente, refresca la pantalla y mantiene 60 segundos de escucha activa antes de volver a dormir.

@@ -105,6 +105,16 @@ static bool wait_for_connection(uint32_t timeout_ms)
     return s_connected;
 }
 
+static esp_err_t publish_topic(const app_settings_t *settings, const char *suffix, const char *payload)
+{
+    char topic[MQTT_TOPIC_MAX_LEN + 32];
+    snprintf(topic, sizeof(topic), "%s/%s", settings->mqtt_base_topic, suffix);
+
+    int message_id = esp_mqtt_client_publish(s_client, topic, payload, 0, 1, 0);
+    ESP_LOGI(TAG, "MQTT publish %s message_id=%d", topic, message_id);
+    return message_id >= 0 ? ESP_OK : ESP_FAIL;
+}
+
 esp_err_t mqtt_app_publish_sensors(const app_settings_t *settings, const sensor_reading_t *reading)
 {
     if (!s_client || !settings->mqtt_base_topic[0]) {
@@ -116,15 +126,12 @@ esp_err_t mqtt_app_publish_sensors(const app_settings_t *settings, const sensor_
         return ESP_ERR_TIMEOUT;
     }
 
-    char topic[MQTT_TOPIC_MAX_LEN + 16];
     char battery[16];
     char voltage[16];
     char temp[16];
     char humidity[16];
     char rssi[16];
-    char payload[320];
 
-    snprintf(topic, sizeof(topic), "%s/sensors", settings->mqtt_base_topic);
     number_or_null(battery, sizeof(battery), reading->has_battery, reading->battery_percent);
     number_or_null(voltage, sizeof(voltage), reading->has_battery, reading->battery_voltage);
     number_or_null(temp, sizeof(temp), reading->has_temperature, reading->temperature_c);
@@ -135,19 +142,25 @@ esp_err_t mqtt_app_publish_sensors(const app_settings_t *settings, const sensor_
         strlcpy(rssi, "null", sizeof(rssi));
     }
 
-    snprintf(
-        payload,
-        sizeof(payload),
-        "{\"deviceId\":\"%s\",\"batteryPercent\":%s,\"batteryVoltage\":%s,\"temperatureC\":%s,\"humidityPercent\":%s,\"rssi\":%s}",
-        settings->device_id,
-        battery,
-        voltage,
-        temp,
-        humidity,
-        rssi
-    );
+    esp_err_t status = ESP_OK;
+    if (publish_topic(settings, "deviceId", settings->device_id) != ESP_OK) {
+        status = ESP_FAIL;
+    }
+    if (publish_topic(settings, "battery/percent", battery) != ESP_OK) {
+        status = ESP_FAIL;
+    }
+    if (publish_topic(settings, "battery/voltage", voltage) != ESP_OK) {
+        status = ESP_FAIL;
+    }
+    if (publish_topic(settings, "temp", temp) != ESP_OK) {
+        status = ESP_FAIL;
+    }
+    if (publish_topic(settings, "hum", humidity) != ESP_OK) {
+        status = ESP_FAIL;
+    }
+    if (publish_topic(settings, "rssi", rssi) != ESP_OK) {
+        status = ESP_FAIL;
+    }
 
-    int message_id = esp_mqtt_client_publish(s_client, topic, payload, 0, 1, 0);
-    ESP_LOGI(TAG, "MQTT publish %s message_id=%d", topic, message_id);
-    return message_id >= 0 ? ESP_OK : ESP_FAIL;
+    return status;
 }

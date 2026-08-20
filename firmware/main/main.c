@@ -11,6 +11,7 @@
 #include "driver/rtc_io.h"
 #include "esp_log.h"
 #include "esp_sleep.h"
+#include "esp_timer.h"
 #include "esp_sntp.h"
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
@@ -25,9 +26,10 @@
 #define BUTTON_GREEN_GPIO GPIO_NUM_3
 #define BUTTON_NEXT_GPIO GPIO_NUM_4
 #define BUTTON_PREVIOUS_GPIO GPIO_NUM_5
-#define DEFAULT_SLEEP_SECONDS 3600
+#define DEFAULT_SLEEP_SECONDS 7200
 #define MIN_SLEEP_SECONDS 60
 #define MAX_SLEEP_SECONDS 86400
+#define BUTTON_INTERACTIVE_WINDOW_US (60LL * 1000LL * 1000LL)
 
 static const char *TAG = "eink_main";
 static device_config_t s_device_config;
@@ -41,6 +43,7 @@ static bool factory_reset_combo_pressed(void)
         .mode = GPIO_MODE_INPUT,
         .pull_up_en = GPIO_PULLUP_ENABLE,
         .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE,
     };
     gpio_config(&config);
     vTaskDelay(pdMS_TO_TICKS(1500));
@@ -231,7 +234,7 @@ static esp_err_t refresh_screen(const char *reason)
     return err;
 }
 
-static void handle_button_action(button_action_t action)
+static esp_err_t handle_button_action(button_action_t action)
 {
     screen_action_t screen_action = SCREEN_ACTION_CURRENT;
 
@@ -254,10 +257,11 @@ static void handle_button_action(button_action_t action)
     );
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "Button action failed: %s", esp_err_to_name(err));
-        return;
+    } else {
+        err = refresh_screen("button");
     }
 
-    refresh_screen("button");
+    return err;
 }
 
 static uint64_t seconds_until_next_refresh(const app_settings_t *settings)
@@ -320,16 +324,34 @@ static bool any_button_pressed(void)
 
 static void wait_for_buttons_released(void)
 {
-    gpio_config_t config = {
-        .pin_bit_mask = (1ULL << BUTTON_GREEN_GPIO) | (1ULL << BUTTON_NEXT_GPIO) | (1ULL << BUTTON_PREVIOUS_GPIO),
-        .mode = GPIO_MODE_INPUT,
-        .pull_up_en = GPIO_PULLUP_ENABLE,
-        .pull_down_en = GPIO_PULLDOWN_DISABLE,
-    };
-    gpio_config(&config);
-
     for (int retry = 0; retry < 100 && any_button_pressed(); retry++) {
         vTaskDelay(pdMS_TO_TICKS(50));
+    }
+}
+
+static void run_button_interactive_window(void)
+{
+    int64_t not_before_us = esp_timer_get_time() + BUTTON_INTERACTIVE_WINDOW_US;
+    ESP_LOGI(TAG, "Button interactive window open for 60 seconds");
+
+    while (true) {
+        const int64_t remaining_us = not_before_us - esp_timer_get_time();
+        if (remaining_us <= 0) {
+            ESP_LOGI(TAG, "Button interactive window closed");
+            return;
+        }
+
+        const uint32_t remaining_ms = (uint32_t)((remaining_us + 999LL) / 1000LL);
+        button_action_t action;
+        if (!buttons_wait_for_action(&action, remaining_ms)) {
+            ESP_LOGI(TAG, "Button interactive window closed");
+            return;
+        }
+
+        handle_button_action(action);
+        wait_for_buttons_released();
+        not_before_us = esp_timer_get_time() + BUTTON_INTERACTIVE_WINDOW_US;
+        ESP_LOGI(TAG, "Button interactive window restarted for 60 seconds");
     }
 }
 
@@ -351,6 +373,7 @@ static void enter_sleep_until_next_refresh(void)
         (1ULL << BUTTON_PREVIOUS_GPIO);
 
     wait_for_buttons_released();
+    buttons_clear_pending();
 
     ESP_ERROR_CHECK(esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL));
     ESP_ERROR_CHECK(esp_sleep_enable_timer_wakeup(sleep_seconds * 1000000ULL));
@@ -404,11 +427,15 @@ void app_main(void)
 
     s_refresh_mutex = xSemaphoreCreateMutex();
     ESP_ERROR_CHECK(s_refresh_mutex ? ESP_OK : ESP_ERR_NO_MEM);
-    ESP_ERROR_CHECK(buttons_init(handle_button_action));
+    ESP_ERROR_CHECK(buttons_init(NULL));
 
     apply_server_settings();
     if (has_wake_button_action) {
+        wait_for_buttons_released();
+        buttons_clear_pending();
         handle_button_action(wake_button_action);
+        wait_for_buttons_released();
+        run_button_interactive_window();
     } else {
         const esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
         refresh_screen(cause == ESP_SLEEP_WAKEUP_TIMER ? "schedule" : "boot");
