@@ -22,7 +22,7 @@ const {
   normalizeServerUrl,
   normalizeStoredServerUrl,
 } = require("./database");
-const { getCalendarDiagnostics, parseIcsEvents } = require("./ics-service");
+const { getCalendarEvents, getCalendarDiagnostics, parseIcsEvents } = require("./ics-service");
 const { getWeatherDiagnostics } = require("./weather-service");
 
 test("device settings do not publish loopback URLs by default", () => {
@@ -255,6 +255,57 @@ test("ICS parser filters titles by configured keywords", () => {
   );
 
   assert.deepEqual(events.map((event) => event.title), ["Reunion"]);
+});
+
+test("calendar keyword filters are scoped per calendar", async () => {
+  const originalFetch = global.fetch;
+  const ics = [
+    "BEGIN:VCALENDAR",
+    "VERSION:2.0",
+    "PRODID:-//My Terminal//Tests//EN",
+    "BEGIN:VEVENT",
+    "UID:hidden-1",
+    "DTSTART:20260817T090000Z",
+    "DTEND:20260817T100000Z",
+    "SUMMARY:Viaje privado",
+    "END:VEVENT",
+    "END:VCALENDAR",
+  ].join("\r\n");
+
+  global.fetch = async () =>
+    new Response(ics, {
+      status: 200,
+      headers: { "Content-Type": "text/calendar" },
+    });
+
+  try {
+    const events = await getCalendarEvents(
+      [
+        {
+          id: "filtered",
+          name: "Filtrado",
+          url: "https://example.test/filtered.ics",
+          color: "#0000FF",
+          enabled: true,
+          excludedKeywords: ["privado"],
+        },
+        {
+          id: "visible",
+          name: "Visible",
+          url: "https://example.test/visible.ics",
+          color: "#FF0000",
+          enabled: true,
+          excludedKeywords: [],
+        },
+      ],
+      new Date("2026-08-17T00:00:00Z"),
+      new Date("2026-08-18T00:00:00Z"),
+    );
+
+    assert.deepEqual(events.map((event) => event.calendarId), ["visible"]);
+  } finally {
+    global.fetch = originalFetch;
+  }
 });
 
 test("calendar diagnostics reports missing URLs", async () => {

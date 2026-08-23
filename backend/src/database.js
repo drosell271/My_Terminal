@@ -69,6 +69,7 @@ db.exec(`
     name TEXT NOT NULL,
     url TEXT NOT NULL,
     color TEXT NOT NULL,
+    excluded_keywords TEXT NOT NULL DEFAULT '[]',
     enabled INTEGER NOT NULL,
     updated_at TEXT NOT NULL
   );
@@ -144,8 +145,14 @@ function migrateSchema() {
     "timezone",
     `TEXT NOT NULL DEFAULT '${DEFAULT_TIMEZONE}'`,
   );
+  ensureColumn(
+    "calendars",
+    "excluded_keywords",
+    "TEXT NOT NULL DEFAULT '[]'",
+  );
 
   backfillWeatherUnitColumns();
+  backfillCalendarExcludedKeywords();
   clearDefaultSensorSeed();
 }
 
@@ -196,8 +203,8 @@ function seedDefaults() {
 
     const insert = db.prepare(`
       INSERT INTO calendars (
-        id, position, name, url, color, enabled, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        id, position, name, url, color, excluded_keywords, enabled, updated_at
+      ) VALUES (?, ?, ?, ?, ?, '[]', ?, ?)
     `);
 
     defaults.forEach(([name, url, color], index) => {
@@ -250,6 +257,31 @@ function backfillWeatherUnitColumns() {
       AND temperature_unit = 'celsius'
       AND wind_unit = 'ms'
   `).run();
+}
+
+function backfillCalendarExcludedKeywords() {
+  const globalKeywords = getEventExceptions().map((exception) => exception.keyword);
+  if (!globalKeywords.length) {
+    return;
+  }
+
+  const calendarsWithKeywords = db.prepare(`
+    SELECT COUNT(*) AS count
+    FROM calendars
+    WHERE excluded_keywords IS NOT NULL
+      AND excluded_keywords <> ''
+      AND excluded_keywords <> '[]'
+  `).get();
+
+  if (calendarsWithKeywords.count > 0) {
+    return;
+  }
+
+  db.prepare(`
+    UPDATE calendars
+    SET excluded_keywords = ?,
+        updated_at = ?
+  `).run(JSON.stringify(normalizeKeywordList(globalKeywords)), new Date().toISOString());
 }
 
 function sanitizeUnsafeServerUrl() {
@@ -515,7 +547,7 @@ function saveDeviceSettings(payload) {
 
 function getCalendars() {
   return db.prepare(`
-    SELECT id, position, name, url, color, enabled, updated_at
+    SELECT id, position, name, url, color, excluded_keywords, enabled, updated_at
     FROM calendars
     ORDER BY position ASC
   `).all().map((row) => ({
@@ -524,6 +556,7 @@ function getCalendars() {
     name: row.name,
     url: row.url,
     color: row.color,
+    excludedKeywords: normalizeKeywordList(parseJson(row.excluded_keywords, [])),
     enabled: Boolean(row.enabled),
     updatedAt: row.updated_at,
   }));
@@ -546,8 +579,8 @@ function saveCalendars(calendars) {
     db.prepare("DELETE FROM calendars").run();
     const insert = db.prepare(`
       INSERT INTO calendars (
-        id, position, name, url, color, enabled, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        id, position, name, url, color, excluded_keywords, enabled, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     normalized.forEach((calendar) => {
@@ -557,6 +590,7 @@ function saveCalendars(calendars) {
         calendar.name,
         calendar.url,
         calendar.color,
+        JSON.stringify(calendar.excludedKeywords),
         calendar.enabled ? 1 : 0,
         calendar.updatedAt,
       );
@@ -894,9 +928,22 @@ function normalizeCalendar(calendar, index, now) {
     name: normalizeText(source.name, `Calendario ${index + 1}`, 80),
     url: normalizeOptionalUrl(source.url),
     color: CALENDAR_COLORS[index] || "#000000",
+    excludedKeywords: normalizeKeywordList(source.excludedKeywords ?? source.keywords ?? []),
     enabled: source.enabled !== false,
     updatedAt: now,
   };
+}
+
+function normalizeKeywordList(value) {
+  const source = Array.isArray(value)
+    ? value
+    : String(value || "").split(/\r?\n|,/);
+
+  return [...new Set(
+    source
+      .map((keyword) => String(keyword || "").trim())
+      .filter(Boolean),
+  )].slice(0, 40).map((keyword) => keyword.slice(0, 120));
 }
 
 function normalizeRefreshHours(value, fallback) {

@@ -202,11 +202,8 @@ app.post("/api/calendars/test", requireAdmin, async (req, res, next) => {
     const calendars = Array.isArray(payload.calendars)
       ? payload.calendars
       : getCalendars();
-    const exceptions = Array.isArray(payload.keywords)
-      ? payload.keywords
-      : getEventExceptions();
 
-    res.json(await getCalendarDiagnostics(calendars, exceptions));
+    res.json(await getCalendarDiagnostics(calendars));
   } catch (error) {
     next(error);
   }

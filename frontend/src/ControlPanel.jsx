@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   Activity,
   Battery,
@@ -8,7 +8,6 @@ import {
   CloudSun,
   Cpu,
   Droplets,
-  MapPin,
   Moon,
   Plus,
   RefreshCcw,
@@ -96,7 +95,6 @@ export default function ControlPanel() {
   const [weatherLocation, setWeatherLocation] = useState(emptyDashboard.weatherLocation);
   const [firmwareForm, setFirmwareForm] = useState(emptyFirmwareForm);
   const [theme, setTheme] = useState(getStoredTheme);
-  const [exceptionText, setExceptionText] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState("");
   const [testingWeather, setTestingWeather] = useState(false);
@@ -105,15 +103,6 @@ export default function ControlPanel() {
   const [calendarTest, setCalendarTest] = useState(null);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
-
-  const exceptionKeywords = useMemo(
-    () =>
-      exceptionText
-        .split("\n")
-        .map((keyword) => keyword.trim())
-        .filter(Boolean),
-    [exceptionText],
-  );
 
   useEffect(() => {
     loadDashboard();
@@ -152,11 +141,6 @@ export default function ControlPanel() {
       ...next.weatherLocation,
       openWeatherApiKey: "",
     });
-    setExceptionText(
-      (next.eventExceptions || [])
-        .map((exception) => exception.keyword)
-        .join("\n"),
-    );
   }
 
   async function uploadFirmwareRelease() {
@@ -207,18 +191,6 @@ export default function ControlPanel() {
       setCalendars(assignCalendarColors(data));
       setCalendarTest(null);
     });
-  }
-
-  async function saveExceptions() {
-    await save(
-      "exceptions",
-      "/api/event-exceptions",
-      { keywords: exceptionKeywords },
-      (data) => {
-        setDashboard((current) => ({ ...current, eventExceptions: data }));
-        setExceptionText(data.map((exception) => exception.keyword).join("\n"));
-      },
-    );
   }
 
   async function saveWeatherLocation() {
@@ -273,7 +245,6 @@ export default function ControlPanel() {
         method: "POST",
         body: JSON.stringify({
           calendars: assignCalendarColors(calendars),
-          keywords: exceptionKeywords,
         }),
       });
       setCalendarTest(data);
@@ -359,6 +330,7 @@ export default function ControlPanel() {
         name: `Calendario ${current.length + 1}`,
         url: "",
         color: CALENDAR_COLORS[current.length]?.value || "#000000",
+        excludedKeywords: [],
         enabled: true,
       },
     ]);
@@ -463,7 +435,7 @@ export default function ControlPanel() {
       </section>
 
       <div className="control-grid">
-        <section className="control-section control-section--wide">
+        <section className="control-section control-section--full calendar-section">
           <SectionHeader
             icon={Settings}
             title="Dispositivo"
@@ -810,6 +782,10 @@ export default function ControlPanel() {
                   value={calendar.url}
                   onChange={(value) => updateCalendar(index, "url", value)}
                 />
+                <KeywordField
+                  value={calendar.excludedKeywords || []}
+                  onChange={(value) => updateCalendar(index, "excludedKeywords", value)}
+                />
                 <CalendarColorBadge color={calendar.color} owner={calendar.name} />
                 <button
                   className="icon-only calendar-delete"
@@ -823,29 +799,6 @@ export default function ControlPanel() {
             ))}
           </div>
           {calendarTest ? <CalendarTestResult result={calendarTest} /> : null}
-        </section>
-
-        <section className="control-section">
-          <SectionHeader
-            icon={MapPin}
-            title="Excepciones"
-            action={
-              <SaveButton
-                busy={saving === "exceptions"}
-                label="Guardar"
-                onClick={saveExceptions}
-              />
-            }
-          />
-          <label className="field field--textarea">
-            <span>Eventos ocultos si contienen</span>
-            <textarea
-              value={exceptionText}
-              onChange={(event) => setExceptionText(event.target.value)}
-              placeholder={"cancelado\nviaje\nprivado"}
-            />
-          </label>
-          <p className="exception-count">{exceptionKeywords.length} reglas activas</p>
         </section>
       </div>
     </main>
@@ -940,6 +893,19 @@ function PasswordField({ className = "", label, value, onChange, placeholder = "
         value={value || ""}
         placeholder={placeholder}
         onChange={(event) => onChange(event.target.value)}
+      />
+    </label>
+  );
+}
+
+function KeywordField({ value, onChange }) {
+  return (
+    <label className="field calendar-keywords">
+      <span>Filtros</span>
+      <textarea
+        value={(value || []).join("\n")}
+        placeholder={"privado\ncancelado"}
+        onChange={(event) => onChange(parseKeywords(event.target.value))}
       />
     </label>
   );
@@ -1159,6 +1125,15 @@ function shortHash(value) {
   return hash ? hash.slice(0, 8) : "--";
 }
 
+function parseKeywords(value) {
+  return [...new Set(
+    String(value || "")
+      .split(/\r?\n|,/)
+      .map((keyword) => keyword.trim())
+      .filter(Boolean),
+  )].slice(0, 40);
+}
+
 function formatWeatherTest(result) {
   if (!result) {
     return "";
@@ -1200,5 +1175,10 @@ function assignCalendarColors(calendars) {
     ...calendar,
     position: index,
     color: CALENDAR_COLORS[index]?.value || "#000000",
+    excludedKeywords: parseKeywords(
+      Array.isArray(calendar.excludedKeywords)
+        ? calendar.excludedKeywords.join("\n")
+        : calendar.excludedKeywords,
+    ),
   }));
 }

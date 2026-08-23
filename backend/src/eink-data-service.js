@@ -1,7 +1,6 @@
 const {
   getCalendars,
   getDeviceSettings,
-  getEventExceptions,
   getScreenState,
   getWeatherLocation,
 } = require("./database");
@@ -32,12 +31,11 @@ async function getEinkData(options = {}) {
   const dataRangeStart = minDate(gridStart, today);
   const dataRangeEnd = maxDate(gridEnd, todayEnd);
   const calendars = getCalendars();
-  const exceptions = getEventExceptions();
   const weatherLocation = getWeatherLocation({ includeSecret: true });
   const deviceSettings = getDeviceSettings();
 
   const [calendarEvents, holidays, weather] = await Promise.all([
-    getCalendarEvents(calendars, exceptions, dataRangeStart, dataRangeEnd),
+    getCalendarEvents(calendars, dataRangeStart, dataRangeEnd),
     getMadridHolidays(dataRangeStart, dataRangeEnd).catch((error) => {
       console.error("Could not read Madrid holidays:", error);
       return [];

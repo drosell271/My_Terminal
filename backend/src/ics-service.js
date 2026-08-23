@@ -12,12 +12,11 @@ const ICS_CACHE_TTL_MS = 10 * 60 * 1000;
 const REQUEST_TIMEOUT_MS = 12_000;
 const MAX_OCCURRENCES_PER_EVENT = 5000;
 
-async function getCalendarEvents(calendars, exceptions, rangeStart, rangeEnd) {
+async function getCalendarEvents(calendars, rangeStart, rangeEnd) {
   const enabledCalendars = calendars.filter((calendar) => calendar.enabled && calendar.url);
-  const keywordMatchers = buildKeywordMatchers(exceptions);
   const results = await Promise.allSettled(
     enabledCalendars.map((calendar) =>
-      getSingleCalendarEvents(calendar, keywordMatchers, rangeStart, rangeEnd),
+      getSingleCalendarEvents(calendar, rangeStart, rangeEnd),
     ),
   );
 
@@ -34,16 +33,15 @@ async function getCalendarEvents(calendars, exceptions, rangeStart, rangeEnd) {
   });
 }
 
-async function getCalendarDiagnostics(calendars, exceptions = []) {
+async function getCalendarDiagnostics(calendars) {
   const sourceCalendars = Array.isArray(calendars) ? calendars.slice(0, 4) : [];
-  const keywordMatchers = buildKeywordMatchers(exceptions);
   const rangeStart = new Date();
   rangeStart.setHours(0, 0, 0, 0);
   const rangeEnd = addDays(rangeStart, 90);
 
   const results = await Promise.all(
     sourceCalendars.map((calendar, index) =>
-      diagnoseSingleCalendar(calendar, index, keywordMatchers, rangeStart, rangeEnd),
+      diagnoseSingleCalendar(calendar, index, rangeStart, rangeEnd),
     ),
   );
   const checked = results.filter((result) => result.checked).length;
@@ -59,10 +57,11 @@ async function getCalendarDiagnostics(calendars, exceptions = []) {
   };
 }
 
-async function diagnoseSingleCalendar(calendar, index, keywordMatchers, rangeStart, rangeEnd) {
+async function diagnoseSingleCalendar(calendar, index, rangeStart, rangeEnd) {
   const name = String(calendar?.name || `Calendario ${index + 1}`).trim();
   const url = String(calendar?.url || "").trim();
   const enabled = calendar?.enabled !== false;
+  const keywordMatchers = buildKeywordMatchers(calendar?.excludedKeywords || calendar?.keywords || []);
 
   if (!enabled) {
     return {
@@ -94,6 +93,7 @@ async function diagnoseSingleCalendar(calendar, index, keywordMatchers, rangeSta
       name,
       url,
       color: calendar?.color || "#000000",
+      excludedKeywords: calendar?.excludedKeywords || [],
       enabled: true,
     };
     const icsText = await fetchIcs(url);
@@ -133,7 +133,7 @@ async function diagnoseSingleCalendar(calendar, index, keywordMatchers, rangeSta
   }
 }
 
-async function getSingleCalendarEvents(calendar, keywordMatchers, rangeStart, rangeEnd) {
+async function getSingleCalendarEvents(calendar, rangeStart, rangeEnd) {
   const cacheKey = `ics:${calendar.id}:${hash(calendar.url)}`;
   const cached = getCacheEntry(cacheKey);
   const icsText = cached || await fetchIcs(calendar.url);
@@ -142,7 +142,13 @@ async function getSingleCalendarEvents(calendar, keywordMatchers, rangeStart, ra
     setCacheEntry(cacheKey, icsText, ICS_CACHE_TTL_MS);
   }
 
-  return parseIcsEvents(icsText, calendar, keywordMatchers, rangeStart, rangeEnd);
+  return parseIcsEvents(
+    icsText,
+    calendar,
+    buildKeywordMatchers(calendar.excludedKeywords || []),
+    rangeStart,
+    rangeEnd,
+  );
 }
 
 function parseIcsEvents(icsText, calendar, keywordMatchers, rangeStart, rangeEnd) {

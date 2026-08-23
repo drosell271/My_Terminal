@@ -304,13 +304,14 @@ Requiere administrador.
       "id": "calendar-1",
       "name": "Daniel",
       "url": "https://example.com/calendar.ics",
+      "excludedKeywords": ["privado", "cancelado"],
       "enabled": true
     }
   ]
 }
 ```
 
-El backend limita la lista a cuatro calendarios. Los colores se asignan por posicion.
+El backend limita la lista a cuatro calendarios. Los colores se asignan por posicion. `excludedKeywords` se aplica solo a ese calendario.
 
 ### `POST /api/calendars/test`
 
@@ -320,8 +321,7 @@ Prueba los calendarios guardados o los enviados en el body.
 
 ```json
 {
-  "calendars": [],
-  "keywords": ["privado", "cancelado"]
+  "calendars": []
 }
 ```
 
@@ -329,13 +329,13 @@ Devuelve estado, numero de calendarios comprobados, fallos y proximos eventos de
 
 ### `GET /api/event-exceptions`
 
-Requiere administrador.
+Requiere administrador. Endpoint legado: los filtros actuales se guardan en cada calendario mediante `excludedKeywords`.
 
-Devuelve palabras clave que ocultan eventos si aparecen en el titulo. La comparacion ignora mayusculas y acentos.
+Devuelve palabras clave globales antiguas. La comparacion ignora mayusculas y acentos.
 
 ### `PUT /api/event-exceptions`
 
-Requiere administrador.
+Requiere administrador. Endpoint legado.
 
 ```json
 {

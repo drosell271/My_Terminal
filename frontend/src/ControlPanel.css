@@ -168,6 +168,10 @@
   grid-column: span 1;
 }
 
+.control-section--full {
+  grid-column: 1 / -1;
+}
+
 .section-header {
   display: flex;
   align-items: center;
@@ -181,7 +185,9 @@
 .section-header h2 {
   display: inline-flex;
   align-items: center;
+  flex: 1 1 auto;
   gap: 8px;
+  min-width: 0;
   margin: 0;
   color: var(--strong);
   font-size: 18px;
@@ -377,11 +383,11 @@
 
 .calendar-row {
   display: grid;
-  grid-template-columns: 72px 130px minmax(180px, 1fr) 116px 34px;
-  gap: 8px;
+  grid-template-columns: 82px minmax(130px, 0.7fr) minmax(260px, 1.35fr) minmax(170px, 0.75fr) 120px 34px;
+  gap: 10px;
   align-items: end;
   min-width: 0;
-  padding-bottom: 9px;
+  padding-bottom: 12px;
   border-bottom: 1px solid var(--border);
 }
 
@@ -444,6 +450,13 @@
 
 .calendar-delete {
   align-self: end;
+}
+
+.calendar-keywords textarea {
+  min-height: 36px;
+  max-height: 72px;
+  padding: 8px 10px;
+  resize: vertical;
 }
 
 .calendar-test {

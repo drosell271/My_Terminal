@@ -112,5 +112,5 @@ Los tokens se aceptan por cabecera dedicada, `Authorization: Bearer ...` o query
 - El firmware esta ajustado a la E1002 y a una pantalla e-paper de 800x480.
 - La paleta final depende de la conversion del firmware, no del backend.
 - Los festivos estan fijados a Espana/Madrid en `holiday-service.js`.
-- El panel soporta hasta cuatro calendarios ICS.
+- El panel soporta hasta cuatro calendarios ICS, cada uno con sus propias palabras de exclusion.
 - `PUBLIC_BASE_URL` no debe ser `localhost`, `127.0.0.1`, `0.0.0.0` ni `::1`, porque la pantalla lo interpreta desde su propia red.
