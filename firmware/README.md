@@ -2,7 +2,7 @@
 
 Firmware para el patrón `headless browser` del proyecto:
 
-- Primer arranque sin configuración: crea AP abierto `EINK-E1002-XXXX` y muestra un PIN numérico de 6 dígitos.
+- Primer arranque sin configuración: crea AP WPA2 `EINK-E1002-XXXX` y muestra un PIN numérico de 8 dígitos. Ese PIN es tambien la clave WiFi temporal.
 - Portal de configuración: `http://192.168.4.1`.
 - El PIN cambia cada vez que se enciende el hotspot y se pide en el formulario del portal.
 - Guarda en NVS: WiFi SSID, WiFi password, URL base del backend, por ejemplo `http://192.168.1.50:3000`, y token de dispositivo opcional.
@@ -11,6 +11,8 @@ Firmware para el patrón `headless browser` del proyecto:
 - Lee ajustes desde `GET /api/device/settings`.
 - Aplica la zona horaria recibida en los ajustes para calcular las horas de despertar.
 - Envía sensores al backend con `POST /api/device/sensors`.
+- Reporta version, presencia, resultado del refresco y estado OTA con `POST /api/device/status`.
+- Consulta OTA en `GET /api/device/firmware`, descarga el binario protegido por token, valida tamano y SHA-256, escribe en el slot OTA alternativo y reinicia.
 - Si el backend define `DEVICE_TOKEN`, el mismo token debe configurarse en el portal WiFi. El firmware lo enviara como `X-Device-Token`.
 - Publica sensores por MQTT usando los ajustes recibidos del backend:
   - `<topic_base>/deviceId`
@@ -47,7 +49,7 @@ Tambien puedes usar el script local:
 
 Los scripts locales prefieren `C:\esp\v5.4.4\esp-idf`. Si necesitas otra ruta, define `MY_TERMINAL_IDF_PATH`.
 
-El build genera `build/eink_e1002_firmware.bin`.
+El build genera `build/eink_e1002_firmware.bin`. Ese fichero es el que puedes publicar desde el panel en `Firmware OTA`.
 
 Para flashear, conecta la E1002 por USB, localiza el puerto y ejecuta:
 
@@ -69,7 +71,7 @@ Para el primer flasheo, o si quieres volver al portal de configuracion desde cer
 .\idf-flash.ps1 -Port COMx
 ```
 
-En el portal inicial, la URL del servidor debe ser la IP real del equipo donde corre Node dentro de tu red, por ejemplo `http://192.168.1.50:3000`.
+En el portal inicial, la URL del servidor debe ser la IP real del equipo donde corre Node dentro de tu red, por ejemplo `http://192.168.1.50:3000`. El portal rechaza URLs `localhost`, `127.0.0.1`, `0.0.0.0` y `::1`.
 
 Despues del primer arranque tambien puedes cambiar esa URL desde el panel, en `Dispositivo -> Servidor backend`. El firmware guardara el nuevo valor en NVS al leer los ajustes solo si responde la API del dispositivo. Si dejas una URL incorrecta, manten los tres botones pulsados al arrancar para borrar WiFi/servidor y volver al portal.
 
@@ -116,6 +118,19 @@ El firmware usa deep sleep entre actualizaciones. Antes de dormir:
 - usa la zona horaria configurada en el panel para convertir esas horas a tiempo local;
 - configura wake por temporizador;
 - configura wake externo por GPIO3, GPIO4 o GPIO5 en nivel bajo;
-- apaga MQTT/WiFi y deja la e-paper en reposo.
+- apaga MQTT/WiFi, desactiva el circuito de lectura de bateria y deja la e-paper en reposo.
 
 Al despertar por boton, el firmware arranca, conecta WiFi, aplica la accion de mes correspondiente, refresca la pantalla y mantiene 60 segundos de escucha activa antes de volver a dormir.
+
+## OTA
+
+La tabla de particiones incluye `otadata`, `ota_0` y `ota_1`, ambos slots de 4 MB. El bootloader tiene rollback activado; cuando una imagen OTA arranca correctamente, el firmware la marca como valida.
+
+Flujo normal:
+
+1. Compila con `.\idf-build.ps1`.
+2. En el panel, abre `Firmware OTA`, selecciona `build/eink_e1002_firmware.bin`, escribe una version y pulsa `Publicar`.
+3. En el siguiente arranque normal o programado, la E1002 consulta el manifest. Si la version publicada difiere de la version actual, descarga el binario.
+4. El firmware valida tamano y SHA-256 antes de activar el nuevo slot.
+
+La comprobacion OTA no se ejecuta al despertar por boton para no retrasar el cambio de mes.

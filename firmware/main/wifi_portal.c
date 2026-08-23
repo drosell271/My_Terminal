@@ -22,7 +22,7 @@
 #define WIFI_FAIL_BIT BIT1
 #define PROVISION_SUBMITTED_BIT BIT2
 #define MAX_STA_RETRIES 8
-#define PROVISION_PIN_LEN 6
+#define PROVISION_PIN_LEN 8
 
 static const char *TAG = "wifi_portal";
 static EventGroupHandle_t s_event_group;
@@ -120,9 +120,9 @@ static const char *portal_html =
     "button{margin-top:18px;width:100%;padding:12px;border:0;border-radius:6px;background:#111;color:#fff;font-weight:800;font-size:16px}"
     "p{line-height:1.4}</style></head><body><main>"
     "<h1>Configurar E1002</h1>"
-    "<p>Conectate al hotspot E1002, abre <b>http://192.168.4.1</b> e introduce el PIN mostrado en la pantalla.</p>"
+    "<p>Conectate al hotspot E1002 usando el PIN de pantalla como clave WiFi. Despues abre <b>http://192.168.4.1</b>.</p>"
     "<form method='post' action='/save'>"
-    "<label>PIN pantalla</label><input name='pin' inputmode='numeric' pattern='[0-9]{6}' maxlength='6' required>"
+    "<label>PIN pantalla</label><input name='pin' inputmode='numeric' pattern='[0-9]{8}' maxlength='8' required>"
     "<label>WiFi SSID</label><input name='ssid' maxlength='32' required>"
     "<label>WiFi password</label><input name='password' type='password' maxlength='64'>"
     "<label>Servidor</label><input name='server' maxlength='128' placeholder='http://192.168.1.50:3000' required>"
@@ -206,8 +206,29 @@ static void trim_trailing_slash(char *value)
 
 static void generate_portal_pin(char *target, size_t target_len)
 {
-    uint32_t pin = 100000U + (esp_random() % 900000U);
-    snprintf(target, target_len, "%06lu", (unsigned long)pin);
+    uint32_t pin = 10000000U + (esp_random() % 90000000U);
+    snprintf(target, target_len, "%08lu", (unsigned long)pin);
+}
+
+static bool starts_with(const char *value, const char *prefix)
+{
+    return strncmp(value, prefix, strlen(prefix)) == 0;
+}
+
+static bool valid_server_url(const char *value)
+{
+    if (!(starts_with(value, "http://") || starts_with(value, "https://"))) {
+        return false;
+    }
+
+    return !starts_with(value, "http://127.") &&
+           !starts_with(value, "https://127.") &&
+           !starts_with(value, "http://localhost") &&
+           !starts_with(value, "https://localhost") &&
+           !starts_with(value, "http://0.0.0.0") &&
+           !starts_with(value, "https://0.0.0.0") &&
+           !starts_with(value, "http://[::1]") &&
+           !starts_with(value, "https://[::1]");
 }
 
 static esp_err_t save_post_handler(httpd_req_t *req)
@@ -243,6 +264,11 @@ static esp_err_t save_post_handler(httpd_req_t *req)
     if (!app_config_is_complete(&s_submitted_config)) {
         httpd_resp_set_status(req, "400 Bad Request");
         return httpd_resp_sendstr(req, "Faltan SSID o servidor");
+    }
+
+    if (!valid_server_url(s_submitted_config.server_url)) {
+        httpd_resp_set_status(req, "400 Bad Request");
+        return httpd_resp_sendstr(req, "Servidor debe ser http(s) y no puede ser localhost");
     }
 
     ESP_ERROR_CHECK(app_config_save(&s_submitted_config));
@@ -298,7 +324,8 @@ static esp_err_t start_access_point(void)
     ap_config.ap.ssid_len = strlen(ssid);
     ap_config.ap.channel = 1;
     ap_config.ap.max_connection = 4;
-    ap_config.ap.authmode = WIFI_AUTH_OPEN;
+    strlcpy((char *)ap_config.ap.password, s_portal_pin, sizeof(ap_config.ap.password));
+    ap_config.ap.authmode = WIFI_AUTH_WPA2_PSK;
 
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &ap_config));

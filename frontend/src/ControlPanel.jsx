@@ -1,25 +1,31 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
+  Activity,
   Battery,
   CalendarDays,
   CheckCircle2,
   Clock,
   CloudSun,
+  Cpu,
   Droplets,
   MapPin,
+  Moon,
   Plus,
   RefreshCcw,
   Save,
   Server,
   Settings,
+  Sun,
   Thermometer,
   Trash2,
+  Upload,
   Wifi,
 } from "lucide-react";
 import "./ControlPanel.css";
 
 const API_BASE = window.location.port === "5173" ? "http://127.0.0.1:3000" : "";
 const ADMIN_TOKEN_STORAGE_KEY = "my-terminal.adminToken";
+const THEME_STORAGE_KEY = "my-terminal.theme";
 const CALENDAR_COLORS = [
   { name: "Daniel", value: "#0000FF" },
   { name: "Alfonso", value: "#FF0000" },
@@ -35,6 +41,18 @@ const emptyDashboard = {
     rssi: null,
     updatedAt: null,
   },
+  deviceStatus: {
+    firmwareVersion: "",
+    lastSeenAt: "",
+    lastRefreshAttemptAt: "",
+    lastScreenRefreshAt: "",
+    screenRefreshStatus: "unknown",
+    refreshReason: "",
+    lastError: "",
+    otaStatus: "",
+    otaVersion: "",
+    otaUpdatedAt: "",
+  },
   settings: {
     deviceId: "",
     refreshHours: [],
@@ -49,6 +67,7 @@ const emptyDashboard = {
     timezoneOptions: [],
   },
   calendars: [],
+  firmwareReleases: [],
   eventExceptions: [],
   weatherLocation: {
     label: "",
@@ -63,11 +82,20 @@ const emptyDashboard = {
   },
 };
 
+const emptyFirmwareForm = {
+  version: "",
+  file: null,
+  notes: "",
+  mandatory: false,
+};
+
 export default function ControlPanel() {
   const [dashboard, setDashboard] = useState(emptyDashboard);
   const [settings, setSettings] = useState(emptyDashboard.settings);
   const [calendars, setCalendars] = useState([]);
   const [weatherLocation, setWeatherLocation] = useState(emptyDashboard.weatherLocation);
+  const [firmwareForm, setFirmwareForm] = useState(emptyFirmwareForm);
+  const [theme, setTheme] = useState(getStoredTheme);
   const [exceptionText, setExceptionText] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState("");
@@ -90,6 +118,14 @@ export default function ControlPanel() {
   useEffect(() => {
     loadDashboard();
   }, []);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(THEME_STORAGE_KEY, theme);
+    } catch (_error) {
+      // localStorage can be unavailable in private browsing contexts.
+    }
+  }, [theme]);
 
   async function loadDashboard() {
     setLoading(true);
@@ -121,6 +157,41 @@ export default function ControlPanel() {
         .map((exception) => exception.keyword)
         .join("\n"),
     );
+  }
+
+  async function uploadFirmwareRelease() {
+    if (!firmwareForm.file || !firmwareForm.version.trim()) {
+      setError("Selecciona un binario y una version");
+      return;
+    }
+
+    setSaving("firmware");
+    setError("");
+
+    try {
+      const contentBase64 = await readFileAsBase64(firmwareForm.file);
+      const data = await api("/api/firmware/releases", {
+        method: "POST",
+        body: JSON.stringify({
+          version: firmwareForm.version,
+          filename: firmwareForm.file.name,
+          contentBase64,
+          notes: firmwareForm.notes,
+          mandatory: firmwareForm.mandatory,
+        }),
+      });
+
+      setDashboard((current) => ({
+        ...current,
+        firmwareReleases: [data, ...(current.firmwareReleases || [])].slice(0, 12),
+      }));
+      setFirmwareForm(emptyFirmwareForm);
+      setNotice("Firmware OTA publicado");
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setSaving("");
+    }
   }
 
   async function saveSettings() {
@@ -309,9 +380,11 @@ export default function ControlPanel() {
   }
 
   const sensorUpdatedAt = formatDateTime(dashboard.sensors.updatedAt);
+  const deviceStatus = { ...emptyDashboard.deviceStatus, ...(dashboard.deviceStatus || {}) };
+  const latestFirmware = (dashboard.firmwareReleases || [])[0];
 
   return (
-    <main className="control-shell">
+    <main className="control-shell" data-theme={theme}>
       <header className="control-header">
         <div>
           <p className="control-kicker">Seeed Studio E1002</p>
@@ -319,6 +392,15 @@ export default function ControlPanel() {
         </div>
         <div className="control-actions">
           <StatusPill loading={loading} saving={saving} notice={notice} error={error} />
+          <button
+            className="icon-button"
+            type="button"
+            onClick={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
+            title={theme === "dark" ? "Cambiar a modo claro" : "Cambiar a modo oscuro"}
+          >
+            {theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
+            {theme === "dark" ? "Claro" : "Oscuro"}
+          </button>
           <button className="icon-button" type="button" onClick={loadDashboard} title="Recargar">
             <RefreshCcw size={18} />
             Recargar
@@ -326,30 +408,57 @@ export default function ControlPanel() {
         </div>
       </header>
 
+      <section className="device-status-row" aria-label="Estado del dispositivo">
+        <StatusMetric
+          icon={Clock}
+          label="Ultima lectura"
+          value={sensorUpdatedAt}
+          detail="Sensores recibidos"
+        />
+        <StatusMetric
+          icon={Activity}
+          label="Ultimo refresco"
+          value={formatDateTime(deviceStatus.lastScreenRefreshAt)}
+          detail={formatRefreshStatus(deviceStatus)}
+        />
+        <StatusMetric
+          icon={Cpu}
+          label="Firmware"
+          value={deviceStatus.firmwareVersion || "--"}
+          detail={formatOtaStatus(deviceStatus)}
+        />
+        <StatusMetric
+          icon={Upload}
+          label="OTA publicada"
+          value={latestFirmware?.version || "--"}
+          detail={
+            latestFirmware
+              ? `${formatBytes(latestFirmware.size)} · ${shortHash(latestFirmware.sha256)}`
+              : "Sin release activo"
+          }
+        />
+      </section>
+
       <section className="sensor-grid" aria-label="Sensores del dispositivo">
         <SensorMetric
           icon={Battery}
           label="Bateria"
           value={formatPercent(dashboard.sensors.batteryPercent)}
-          detail={sensorUpdatedAt}
         />
         <SensorMetric
           icon={Thermometer}
           label="Temperatura"
           value={formatDegrees(dashboard.sensors.temperatureC)}
-          detail={sensorUpdatedAt}
         />
         <SensorMetric
           icon={Droplets}
           label="Humedad"
           value={formatPercent(dashboard.sensors.humidityPercent)}
-          detail={sensorUpdatedAt}
         />
         <SensorMetric
           icon={Wifi}
           label="RSSI"
           value={formatRssi(dashboard.sensors.rssi)}
-          detail={sensorUpdatedAt}
         />
       </section>
 
@@ -461,6 +570,84 @@ export default function ControlPanel() {
                   onChange={(value) => updateSetting("mqttPassword", value)}
                 />
               </div>
+            </div>
+          </div>
+        </section>
+
+        <section className="control-section">
+          <SectionHeader
+            icon={Upload}
+            title="Firmware OTA"
+            action={
+              <SaveButton
+                busy={saving === "firmware"}
+                disabled={!firmwareForm.file || !firmwareForm.version.trim()}
+                label="Publicar"
+                onClick={uploadFirmwareRelease}
+              />
+            }
+          />
+
+          <div className="firmware-panel">
+            <div className="firmware-current">
+              <span>Release activo</span>
+              <strong>{latestFirmware?.version || "--"}</strong>
+              <small>
+                {latestFirmware
+                  ? `${formatDateTime(latestFirmware.createdAt)} · ${formatBytes(latestFirmware.size)}`
+                  : "No hay binario publicado"}
+              </small>
+            </div>
+
+            <div className="firmware-grid">
+              <TextField
+                label="Version"
+                value={firmwareForm.version}
+                placeholder="1.0.0"
+                onChange={(value) =>
+                  setFirmwareForm((current) => ({ ...current, version: value }))
+                }
+              />
+              <label className="field file-field">
+                <span>Binario .bin</span>
+                <input
+                  key={firmwareForm.file ? firmwareForm.file.name : "empty-file"}
+                  type="file"
+                  accept=".bin,application/octet-stream"
+                  onChange={(event) =>
+                    setFirmwareForm((current) => ({
+                      ...current,
+                      file: event.target.files?.[0] || null,
+                    }))
+                  }
+                />
+              </label>
+              <label className="switch-row firmware-mandatory">
+                <input
+                  type="checkbox"
+                  checked={firmwareForm.mandatory}
+                  onChange={(event) =>
+                    setFirmwareForm((current) => ({
+                      ...current,
+                      mandatory: event.target.checked,
+                    }))
+                  }
+                />
+                Obligatoria
+              </label>
+              <label className="field field--textarea field--full firmware-notes">
+                <span>Notas</span>
+                <textarea
+                  value={firmwareForm.notes}
+                  onChange={(event) =>
+                    setFirmwareForm((current) => ({
+                      ...current,
+                      notes: event.target.value,
+                    }))
+                  }
+                  placeholder="Cambios incluidos en esta version"
+                />
+              </label>
             </div>
           </div>
         </section>
@@ -684,6 +871,19 @@ function SensorMetric({ icon: Icon, label, value, detail }) {
       <div>
         <span>{label}</span>
         <strong>{value}</strong>
+        {detail ? <small>{detail}</small> : null}
+      </div>
+    </article>
+  );
+}
+
+function StatusMetric({ icon: Icon, label, value, detail }) {
+  return (
+    <article className="status-card">
+      <Icon size={18} />
+      <div>
+        <span>{label}</span>
+        <strong>{value}</strong>
         <small>{detail}</small>
       </div>
     </article>
@@ -793,9 +993,14 @@ function CalendarColorBadge({ color, owner }) {
   );
 }
 
-function SaveButton({ busy, label, onClick }) {
+function SaveButton({ busy, disabled = false, label, onClick }) {
   return (
-    <button className="icon-button icon-button--primary" type="button" onClick={onClick}>
+    <button
+      className="icon-button icon-button--primary"
+      type="button"
+      onClick={onClick}
+      disabled={busy || disabled}
+    >
       <Save size={16} />
       {busy ? "Guardando" : label}
     </button>
@@ -864,6 +1069,26 @@ function getStoredAdminToken() {
   }
 }
 
+function getStoredTheme() {
+  try {
+    return window.localStorage.getItem(THEME_STORAGE_KEY) === "light" ? "light" : "dark";
+  } catch (_error) {
+    return "dark";
+  }
+}
+
+function readFileAsBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = String(reader.result || "");
+      resolve(result.includes(",") ? result.split(",").pop() : result);
+    };
+    reader.onerror = () => reject(new Error("No se pudo leer el binario"));
+    reader.readAsDataURL(file);
+  });
+}
+
 function formatPercent(value) {
   return value === null || value === undefined ? "--" : `${Math.round(value)}%`;
 }
@@ -892,6 +1117,46 @@ function formatDateTime(value) {
     hour: "2-digit",
     minute: "2-digit",
   }).format(new Date(value));
+}
+
+function formatRefreshStatus(status) {
+  if (status.screenRefreshStatus === "success") {
+    return status.refreshReason ? `OK · ${status.refreshReason}` : "OK";
+  }
+
+  if (status.screenRefreshStatus === "error") {
+    return status.lastError ? `Error · ${status.lastError}` : "Error";
+  }
+
+  return "Sin refresco reportado";
+}
+
+function formatOtaStatus(status) {
+  if (!status.otaStatus) {
+    return status.lastSeenAt ? `Visto ${formatDateTime(status.lastSeenAt)}` : "Sin conexion reportada";
+  }
+
+  return status.otaVersion
+    ? `${status.otaStatus} · ${status.otaVersion}`
+    : status.otaStatus;
+}
+
+function formatBytes(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number) || number <= 0) {
+    return "--";
+  }
+
+  if (number < 1024 * 1024) {
+    return `${Math.round(number / 1024)} KB`;
+  }
+
+  return `${(number / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function shortHash(value) {
+  const hash = String(value || "");
+  return hash ? hash.slice(0, 8) : "--";
 }
 
 function formatWeatherTest(result) {

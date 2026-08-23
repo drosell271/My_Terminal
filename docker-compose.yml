@@ -14,6 +14,7 @@ services:
       PORT: ${PORT:-3000}
       TZ: ${TZ:-Europe/Madrid}
       DB_FILE: /data/app.sqlite
+      FIRMWARE_DIR: /data/firmware
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-}
       EINK_RENDER_URL: ${EINK_RENDER_URL:-}
       PUPPETEER_CACHE_DIR: /app/.cache/puppeteer

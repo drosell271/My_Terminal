@@ -46,6 +46,7 @@ PORT=3002
 TZ=Europe/Madrid
 PUBLIC_BASE_URL=http://IP_DEL_SERVIDOR:3002
 EINK_RENDER_URL=
+FIRMWARE_DIR=/data/firmware
 ADMIN_TOKEN=pon-un-token-largo
 DEVICE_TOKEN=pon-otro-token-largo
 CORS_ORIGIN=

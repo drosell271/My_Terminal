@@ -20,6 +20,8 @@ idf_component_register(
     esp_http_client
     esp_http_server
     esp_netif
+    esp_app_format
+    app_update
     esp_timer
     esp_wifi
     freertos
@@ -27,6 +29,7 @@ idf_component_register(
     cjson
     log
     lwip
+    mbedtls
     mqtt
     nvs_flash
     esp_epaper

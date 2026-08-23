@@ -9,6 +9,7 @@ Panel para una pantalla e-paper Seeed reTerminal E1002. El backend renderiza una
   - `/eink`: pantalla final para la E1002.
   - `/control`: panel de administracion.
 - Firmware ESP-IDF para la Seeed reTerminal E1002.
+- OTA desde el panel de control con manifest protegido por token y validacion SHA-256 en firmware.
 - Despliegue Docker/Portainer con volumen persistente para datos.
 
 ## Estructura
@@ -118,7 +119,7 @@ La referencia completa esta en [docs/API.md](docs/API.md).
 
 ## Firmware
 
-La pantalla arranca en modo portal WiFi si no tiene configuracion guardada, descarga `/api/screen.bmp`, publica sensores, aplica horarios de despertador y permite navegar meses con botones fisicos.
+La pantalla arranca en modo portal WiFi protegido por PIN si no tiene configuracion guardada, descarga `/api/screen.bmp`, publica sensores/estado, aplica horarios de despertador, permite navegar meses con botones fisicos y puede actualizar firmware via OTA.
 
 Consulta [firmware/README.md](firmware/README.md) para compilar, flashear y ver los pines usados.
 

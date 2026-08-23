@@ -209,3 +209,8 @@ esp_err_t sensors_read(sensor_reading_t *reading)
     read_rssi(reading);
     return (battery_err == ESP_OK || sht_err == ESP_OK || reading->has_rssi) ? ESP_OK : ESP_FAIL;
 }
+
+void sensors_sleep(void)
+{
+    gpio_set_level(BATTERY_ENABLE_GPIO, 0);
+}

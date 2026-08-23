@@ -1,6 +1,6 @@
 const fs = require("node:fs");
 const path = require("node:path");
-const { randomUUID } = require("node:crypto");
+const { createHash, randomUUID } = require("node:crypto");
 const { DatabaseSync } = require("node:sqlite");
 const { loadEnv } = require("./env");
 const {
@@ -13,9 +13,12 @@ const {
 loadEnv();
 
 const DB_FILE = process.env.DB_FILE || path.resolve(__dirname, "../data/app.sqlite");
+const FIRMWARE_DIR = process.env.FIRMWARE_DIR || path.join(path.dirname(DB_FILE), "firmware");
 const CALENDAR_COLORS = ["#0000FF", "#FF0000", "#00FF00", "#FFFF00"];
+const MAX_FIRMWARE_BYTES = 4 * 1024 * 1024;
 
 fs.mkdirSync(path.dirname(DB_FILE), { recursive: true });
+fs.mkdirSync(FIRMWARE_DIR, { recursive: true });
 
 const db = new DatabaseSync(DB_FILE);
 
@@ -30,6 +33,20 @@ db.exec(`
     humidity_percent REAL,
     rssi INTEGER,
     updated_at TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS device_status (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    firmware_version TEXT NOT NULL,
+    last_seen_at TEXT NOT NULL,
+    last_refresh_attempt_at TEXT NOT NULL,
+    last_screen_refresh_at TEXT NOT NULL,
+    screen_refresh_status TEXT NOT NULL,
+    refresh_reason TEXT NOT NULL,
+    last_error TEXT NOT NULL,
+    ota_status TEXT NOT NULL,
+    ota_version TEXT NOT NULL,
+    ota_updated_at TEXT NOT NULL
   );
 
   CREATE TABLE IF NOT EXISTS device_settings (
@@ -87,6 +104,19 @@ db.exec(`
     expires_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   );
+
+  CREATE TABLE IF NOT EXISTS firmware_releases (
+    id TEXT PRIMARY KEY,
+    version TEXT NOT NULL,
+    filename TEXT NOT NULL,
+    path TEXT NOT NULL,
+    sha256 TEXT NOT NULL,
+    size INTEGER NOT NULL,
+    mandatory INTEGER NOT NULL,
+    notes TEXT NOT NULL,
+    active INTEGER NOT NULL,
+    created_at TEXT NOT NULL
+  );
 `);
 
 migrateSchema();
@@ -135,6 +165,14 @@ function seedDefaults() {
     INSERT OR IGNORE INTO sensor_readings (
       id, battery_percent, temperature_c, humidity_percent, rssi, updated_at
     ) VALUES (1, NULL, NULL, NULL, NULL, '')
+  `).run();
+
+  db.prepare(`
+    INSERT OR IGNORE INTO device_status (
+      id, firmware_version, last_seen_at, last_refresh_attempt_at,
+      last_screen_refresh_at, screen_refresh_status, refresh_reason,
+      last_error, ota_status, ota_version, ota_updated_at
+    ) VALUES (1, '', '', '', '', 'unknown', '', '', '', '', '')
   `).run();
 
   db.prepare(`
@@ -237,11 +275,13 @@ function sanitizeUnsafeServerUrl() {
 function getDashboard() {
   return {
     sensors: getSensors(),
+    deviceStatus: getDeviceStatus(),
     settings: getDeviceSettings(),
     calendars: getCalendars(),
     eventExceptions: getEventExceptions(),
     weatherLocation: getWeatherLocation(),
     screenState: getScreenState(),
+    firmwareReleases: getFirmwareReleases(),
   };
 }
 
@@ -310,6 +350,96 @@ function saveSensors(payload) {
   );
 
   return getSensors();
+}
+
+function getDeviceStatus() {
+  const row = db.prepare(`
+    SELECT firmware_version, last_seen_at, last_refresh_attempt_at,
+           last_screen_refresh_at, screen_refresh_status, refresh_reason,
+           last_error, ota_status, ota_version, ota_updated_at
+    FROM device_status
+    WHERE id = 1
+  `).get();
+
+  if (!row) {
+    return emptyDeviceStatus();
+  }
+
+  return {
+    firmwareVersion: row.firmware_version,
+    lastSeenAt: row.last_seen_at,
+    lastRefreshAttemptAt: row.last_refresh_attempt_at,
+    lastScreenRefreshAt: row.last_screen_refresh_at,
+    screenRefreshStatus: row.screen_refresh_status,
+    refreshReason: row.refresh_reason,
+    lastError: row.last_error,
+    otaStatus: row.ota_status,
+    otaVersion: row.ota_version,
+    otaUpdatedAt: row.ota_updated_at,
+  };
+}
+
+function saveDeviceStatus(payload) {
+  const current = getDeviceStatus();
+  const now = new Date().toISOString();
+  const hasRefreshStatus = String(payload.screenRefreshStatus || "").trim() !== "";
+  const screenRefreshStatus = hasRefreshStatus
+    ? normalizeDeviceStatus(payload.screenRefreshStatus, current.screenRefreshStatus)
+    : current.screenRefreshStatus;
+  const hasOtaStatus = String(payload.otaStatus || "").trim() !== "";
+
+  const next = {
+    firmwareVersion: normalizeText(payload.firmwareVersion, current.firmwareVersion, 64, true),
+    lastSeenAt: now,
+    lastRefreshAttemptAt: hasRefreshStatus ? now : current.lastRefreshAttemptAt,
+    lastScreenRefreshAt:
+      hasRefreshStatus && screenRefreshStatus === "success"
+        ? now
+        : current.lastScreenRefreshAt,
+    screenRefreshStatus,
+    refreshReason: hasRefreshStatus
+      ? normalizeText(payload.refreshReason, "", 40, true)
+      : current.refreshReason,
+    lastError:
+      hasRefreshStatus && screenRefreshStatus === "success"
+        ? ""
+        : normalizeText(payload.lastError, current.lastError, 240, true),
+    otaStatus: hasOtaStatus
+      ? normalizeText(payload.otaStatus, "", 40, true)
+      : current.otaStatus,
+    otaVersion: hasOtaStatus
+      ? normalizeText(payload.otaVersion, "", 64, true)
+      : current.otaVersion,
+    otaUpdatedAt: hasOtaStatus ? now : current.otaUpdatedAt,
+  };
+
+  db.prepare(`
+    UPDATE device_status
+    SET firmware_version = ?,
+        last_seen_at = ?,
+        last_refresh_attempt_at = ?,
+        last_screen_refresh_at = ?,
+        screen_refresh_status = ?,
+        refresh_reason = ?,
+        last_error = ?,
+        ota_status = ?,
+        ota_version = ?,
+        ota_updated_at = ?
+    WHERE id = 1
+  `).run(
+    next.firmwareVersion,
+    next.lastSeenAt,
+    next.lastRefreshAttemptAt,
+    next.lastScreenRefreshAt,
+    next.screenRefreshStatus,
+    next.refreshReason,
+    next.lastError,
+    next.otaStatus,
+    next.otaVersion,
+    next.otaUpdatedAt,
+  );
+
+  return getDeviceStatus();
 }
 
 function getDeviceSettings() {
@@ -604,6 +734,122 @@ function resetScreenMonth() {
   return setScreenMonthOffset(0);
 }
 
+function getFirmwareReleases() {
+  return db.prepare(`
+    SELECT id, version, filename, sha256, size, mandatory, notes, active, created_at
+    FROM firmware_releases
+    ORDER BY active DESC, created_at DESC
+    LIMIT 12
+  `).all().map(publicFirmwareRelease);
+}
+
+function getLatestFirmwareRelease() {
+  const row = db.prepare(`
+    SELECT id, version, filename, path, sha256, size, mandatory, notes, active, created_at
+    FROM firmware_releases
+    WHERE active = 1
+    ORDER BY created_at DESC
+    LIMIT 1
+  `).get();
+
+  return row ? firmwareReleaseFromRow(row) : null;
+}
+
+function getFirmwareRelease(id) {
+  const row = db.prepare(`
+    SELECT id, version, filename, path, sha256, size, mandatory, notes, active, created_at
+    FROM firmware_releases
+    WHERE id = ?
+  `).get(String(id || ""));
+
+  return row ? firmwareReleaseFromRow(row) : null;
+}
+
+function saveFirmwareRelease(payload) {
+  const id = randomUUID();
+  const now = new Date().toISOString();
+  const version = normalizeFirmwareVersion(payload.version);
+  const notes = normalizeText(payload.notes, "", 500, true);
+  const filename = normalizeFirmwareFilename(payload.filename, version);
+  const binary = decodeFirmwareBinary(payload.contentBase64);
+  const sha256 = createHash("sha256").update(binary).digest("hex");
+  const storedFilename = `${id}.bin`;
+  const storedPath = path.join(FIRMWARE_DIR, storedFilename);
+  const mandatory = payload.mandatory === true;
+
+  fs.writeFileSync(storedPath, binary, { flag: "wx" });
+
+  db.exec("BEGIN");
+  try {
+    db.prepare("UPDATE firmware_releases SET active = 0").run();
+    db.prepare(`
+      INSERT INTO firmware_releases (
+        id, version, filename, path, sha256, size, mandatory, notes, active, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+    `).run(
+      id,
+      version,
+      filename,
+      storedPath,
+      sha256,
+      binary.length,
+      mandatory ? 1 : 0,
+      notes,
+      now,
+    );
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    fs.rmSync(storedPath, { force: true });
+    throw error;
+  }
+
+  return publicFirmwareRelease(getFirmwareRelease(id));
+}
+
+function getFirmwareManifest(options = {}) {
+  const latest = getLatestFirmwareRelease();
+  const currentVersion = String(options.currentVersion || "").trim();
+
+  if (!latest) {
+    return {
+      currentVersion,
+      latestVersion: "",
+      updateAvailable: false,
+      url: "",
+      sha256: "",
+      size: 0,
+      mandatory: false,
+      releasedAt: "",
+      notes: "",
+    };
+  }
+
+  const baseUrl = String(options.baseUrl || "").replace(/\/$/, "");
+  const pathName = `/api/device/firmware/${latest.id}.bin`;
+
+  return {
+    currentVersion,
+    latestVersion: latest.version,
+    updateAvailable: currentVersion ? currentVersion !== latest.version : true,
+    url: baseUrl ? `${baseUrl}${pathName}` : pathName,
+    sha256: latest.sha256,
+    size: latest.size,
+    mandatory: latest.mandatory,
+    releasedAt: latest.createdAt,
+    notes: latest.notes,
+  };
+}
+
+function getFirmwareBinaryPath(id) {
+  const release = getFirmwareRelease(id);
+  if (!release || !fs.existsSync(release.path)) {
+    return null;
+  }
+
+  return release.path;
+}
+
 function getCacheEntry(key) {
   const row = db.prepare(`
     SELECT value, expires_at
@@ -857,11 +1103,92 @@ function parseJson(value, fallback) {
   }
 }
 
+function emptyDeviceStatus() {
+  return {
+    firmwareVersion: "",
+    lastSeenAt: "",
+    lastRefreshAttemptAt: "",
+    lastScreenRefreshAt: "",
+    screenRefreshStatus: "unknown",
+    refreshReason: "",
+    lastError: "",
+    otaStatus: "",
+    otaVersion: "",
+    otaUpdatedAt: "",
+  };
+}
+
+function normalizeDeviceStatus(value, fallback) {
+  const status = String(value || "").trim().toLowerCase();
+  return ["success", "error", "unknown"].includes(status) ? status : fallback;
+}
+
+function decodeFirmwareBinary(value) {
+  const base64 = String(value || "").replace(/^data:[^,]+,/, "").trim();
+  if (!base64) {
+    throw new Error("Firmware binary is required");
+  }
+
+  const binary = Buffer.from(base64, "base64");
+  if (!binary.length || binary.length > MAX_FIRMWARE_BYTES) {
+    throw new Error(`Firmware binary must be between 1 byte and ${MAX_FIRMWARE_BYTES} bytes`);
+  }
+
+  return binary;
+}
+
+function normalizeFirmwareFilename(value, version) {
+  const filename = path.basename(String(value || `firmware-${version}.bin`).trim());
+  const safe = filename.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 120);
+  return safe.endsWith(".bin") ? safe : `${safe || "firmware"}.bin`;
+}
+
+function normalizeFirmwareVersion(value) {
+  const version = String(value || "").trim().slice(0, 64);
+  if (!/^[a-zA-Z0-9._+-]{1,64}$/.test(version)) {
+    throw new Error("Firmware version must use only letters, numbers, dot, underscore, plus or dash");
+  }
+
+  return version;
+}
+
+function firmwareReleaseFromRow(row) {
+  return {
+    id: row.id,
+    version: row.version,
+    filename: row.filename,
+    path: row.path,
+    sha256: row.sha256,
+    size: row.size,
+    mandatory: Boolean(row.mandatory),
+    notes: row.notes,
+    active: Boolean(row.active),
+    createdAt: row.created_at,
+  };
+}
+
+function publicFirmwareRelease(row) {
+  const release = row.path === undefined ? firmwareReleaseFromRow(row) : row;
+  return {
+    id: release.id,
+    version: release.version,
+    filename: release.filename,
+    sha256: release.sha256,
+    size: release.size,
+    mandatory: release.mandatory,
+    notes: release.notes,
+    active: release.active,
+    createdAt: release.createdAt,
+  };
+}
+
 module.exports = {
   CALENDAR_COLORS,
   getDashboard,
   getSensors,
   saveSensors,
+  getDeviceStatus,
+  saveDeviceStatus,
   getDeviceSettings,
   saveDeviceSettings,
   getCalendars,
@@ -874,6 +1201,11 @@ module.exports = {
   setScreenMonthOffset,
   moveScreenMonth,
   resetScreenMonth,
+  getFirmwareReleases,
+  getFirmwareRelease,
+  saveFirmwareRelease,
+  getFirmwareManifest,
+  getFirmwareBinaryPath,
   getCacheEntry,
   setCacheEntry,
   normalizeServerUrl,

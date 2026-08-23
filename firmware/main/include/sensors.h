@@ -17,3 +17,4 @@ typedef struct {
 
 esp_err_t sensors_init(void);
 esp_err_t sensors_read(sensor_reading_t *reading);
+void sensors_sleep(void);

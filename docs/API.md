@@ -158,6 +158,40 @@ Rangos validados:
 | `humidityPercent` | `0` a `100` |
 | `rssi` | `-150` a `20` |
 
+### `GET /api/device/status`
+
+Requiere administrador. Resume presencia, ultimo refresco real de pantalla y estado OTA reportado por el firmware.
+
+```json
+{
+  "firmwareVersion": "234b635",
+  "lastSeenAt": "2026-08-23T08:00:00.000Z",
+  "lastRefreshAttemptAt": "2026-08-23T08:00:02.000Z",
+  "lastScreenRefreshAt": "2026-08-23T08:00:10.000Z",
+  "screenRefreshStatus": "success",
+  "refreshReason": "schedule",
+  "lastError": "",
+  "otaStatus": "current",
+  "otaVersion": "234b635",
+  "otaUpdatedAt": "2026-08-23T08:00:00.000Z"
+}
+```
+
+### `POST /api/device/status`
+
+Requiere dispositivo. Lo usa el firmware para reportar version, heartbeats, resultado de refresco y progreso OTA.
+
+```json
+{
+  "firmwareVersion": "234b635",
+  "screenRefreshStatus": "success",
+  "refreshReason": "schedule",
+  "lastError": "",
+  "otaStatus": "current",
+  "otaVersion": "234b635"
+}
+```
+
 ### `GET /api/device/settings`
 
 Requiere administrador o dispositivo si `DEVICE_TOKEN` esta configurado.
@@ -204,6 +238,54 @@ Notas:
 - `timezone` debe estar entre las opciones expuestas por `GET /api/device/settings`.
 - `serverUrl` debe empezar por `http://` o `https://`.
 - Si se envia una URL terminada en `/api/screen.bmp`, se guarda solo la base.
+
+### `GET /api/device/firmware`
+
+Requiere dispositivo. Query opcional:
+
+| Parametro | Tipo | Descripcion |
+|---|---|---|
+| `version` | string | Version actual del firmware que consulta. |
+
+Devuelve el manifest OTA activo:
+
+```json
+{
+  "currentVersion": "234b635",
+  "latestVersion": "1.0.0",
+  "updateAvailable": true,
+  "url": "http://192.168.1.50:3002/api/device/firmware/release-id.bin",
+  "sha256": "hexadecimal-de-64-caracteres",
+  "size": 1073264,
+  "mandatory": false,
+  "releasedAt": "2026-08-23T08:00:00.000Z",
+  "notes": "Cambios"
+}
+```
+
+### `GET /api/device/firmware/:id.bin`
+
+Requiere dispositivo. Descarga el binario publicado para OTA. El firmware valida `size` y `sha256` antes de marcarlo como arrancable.
+
+### `GET /api/firmware/releases`
+
+Requiere administrador. Lista los ultimos releases publicados desde el panel.
+
+### `POST /api/firmware/releases`
+
+Requiere administrador. Publica un binario OTA y lo marca como release activo.
+
+```json
+{
+  "version": "1.0.0",
+  "filename": "eink_e1002_firmware.bin",
+  "contentBase64": "AAAA...",
+  "mandatory": false,
+  "notes": "Cambios"
+}
+```
+
+`version` acepta letras, numeros, `.`, `_`, `+` y `-`.
 
 ### `GET /api/calendars`
 

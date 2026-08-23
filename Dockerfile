@@ -4,6 +4,7 @@ ENV NODE_ENV=production
 ENV PORT=3000
 ENV TZ=Europe/Madrid
 ENV DB_FILE=/data/app.sqlite
+ENV FIRMWARE_DIR=/data/firmware
 ENV EINK_RENDER_URL=
 ENV PUPPETEER_CACHE_DIR=/app/.cache/puppeteer
 

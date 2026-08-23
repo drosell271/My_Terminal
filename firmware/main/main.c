@@ -9,8 +9,11 @@
 #include "display_driver.h"
 #include "driver/gpio.h"
 #include "driver/rtc_io.h"
+#include "esp_app_desc.h"
 #include "esp_log.h"
+#include "esp_ota_ops.h"
 #include "esp_sleep.h"
+#include "esp_system.h"
 #include "esp_timer.h"
 #include "esp_sntp.h"
 #include "esp_wifi.h"
@@ -35,6 +38,56 @@ static const char *TAG = "eink_main";
 static device_config_t s_device_config;
 static app_settings_t s_settings;
 static SemaphoreHandle_t s_refresh_mutex;
+
+static const char *firmware_version(void)
+{
+    const esp_app_desc_t *description = esp_app_get_description();
+    return description ? description->version : "";
+}
+
+static void mark_running_app_valid(void)
+{
+    const esp_partition_t *running = esp_ota_get_running_partition();
+    esp_ota_img_states_t state;
+
+    if (running &&
+        esp_ota_get_state_partition(running, &state) == ESP_OK &&
+        state == ESP_OTA_IMG_PENDING_VERIFY) {
+        esp_err_t err = esp_ota_mark_app_valid_cancel_rollback();
+        if (err == ESP_OK) {
+            ESP_LOGW(TAG, "OTA image marked valid");
+        } else {
+            ESP_LOGE(TAG, "Could not mark OTA image valid: %s", esp_err_to_name(err));
+        }
+    }
+}
+
+static void post_device_status(
+    const char *screen_refresh_status,
+    const char *refresh_reason,
+    const char *last_error,
+    const char *ota_status,
+    const char *ota_version
+)
+{
+    if (!app_config_is_complete(&s_device_config)) {
+        return;
+    }
+
+    esp_err_t err = server_api_post_device_status(
+        s_device_config.server_url,
+        s_device_config.device_token,
+        firmware_version(),
+        screen_refresh_status,
+        refresh_reason,
+        last_error,
+        ota_status,
+        ota_version
+    );
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Device status post failed: %s", esp_err_to_name(err));
+    }
+}
 
 static bool factory_reset_combo_pressed(void)
 {
@@ -199,6 +252,46 @@ static void read_and_send_sensors(void)
     mqtt_app_publish_sensors(&s_settings, &reading);
 }
 
+static void check_for_ota_update(void)
+{
+    firmware_manifest_t manifest;
+
+    post_device_status(NULL, NULL, NULL, "checking", "");
+    esp_err_t err = server_api_fetch_firmware_manifest(
+        s_device_config.server_url,
+        s_device_config.device_token,
+        firmware_version(),
+        &manifest
+    );
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Firmware update check failed: %s", esp_err_to_name(err));
+        post_device_status(NULL, NULL, NULL, "check_failed", "");
+        return;
+    }
+
+    if (!manifest.update_available) {
+        post_device_status(NULL, NULL, NULL, "current", firmware_version());
+        return;
+    }
+
+    ESP_LOGW(TAG, "Firmware update available: %s", manifest.latest_version);
+    post_device_status(NULL, NULL, NULL, "downloading", manifest.latest_version);
+    err = server_api_perform_ota_update(
+        s_device_config.server_url,
+        s_device_config.device_token,
+        &manifest
+    );
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Firmware update failed: %s", esp_err_to_name(err));
+        post_device_status(NULL, NULL, NULL, "failed", manifest.latest_version);
+        return;
+    }
+
+    post_device_status(NULL, NULL, NULL, "installed", manifest.latest_version);
+    vTaskDelay(pdMS_TO_TICKS(500));
+    esp_restart();
+}
+
 static esp_err_t refresh_screen(const char *reason)
 {
     if (xSemaphoreTake(s_refresh_mutex, pdMS_TO_TICKS(100)) != pdTRUE) {
@@ -226,8 +319,10 @@ static esp_err_t refresh_screen(const char *reason)
     if (err == ESP_OK) {
         display_driver_sleep();
         ESP_LOGI(TAG, "Refresh complete");
+        post_device_status("success", reason, "", NULL, NULL);
     } else {
         ESP_LOGE(TAG, "Refresh failed: %s", esp_err_to_name(err));
+        post_device_status("error", reason, esp_err_to_name(err), NULL, NULL);
     }
 
     xSemaphoreGive(s_refresh_mutex);
@@ -384,6 +479,7 @@ static void enter_sleep_until_next_refresh(void)
     ESP_ERROR_CHECK(esp_sleep_enable_ext1_wakeup(button_mask, ESP_EXT1_WAKEUP_ANY_LOW));
 
     mqtt_app_stop();
+    sensors_sleep();
     esp_wifi_stop();
     display_driver_sleep();
 
@@ -417,6 +513,7 @@ void app_main(void)
     ESP_ERROR_CHECK(display_driver_init());
     ESP_ERROR_CHECK(wifi_portal_init());
     ESP_ERROR_CHECK(wifi_portal_connect_or_configure(&s_device_config));
+    mark_running_app_valid();
 
     init_time();
     ESP_ERROR_CHECK(sensors_init());
@@ -430,6 +527,12 @@ void app_main(void)
     ESP_ERROR_CHECK(buttons_init(NULL));
 
     apply_server_settings();
+    post_device_status(NULL, NULL, NULL, NULL, NULL);
+    const esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
+    if (!has_wake_button_action) {
+        check_for_ota_update();
+    }
+
     if (has_wake_button_action) {
         wait_for_buttons_released();
         buttons_clear_pending();
@@ -437,7 +540,6 @@ void app_main(void)
         wait_for_buttons_released();
         run_button_interactive_window();
     } else {
-        const esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
         refresh_screen(cause == ESP_SLEEP_WAKEUP_TIMER ? "schedule" : "boot");
     }
 

@@ -19,6 +19,8 @@ const {
   getDashboard,
   getSensors,
   saveSensors,
+  getDeviceStatus,
+  saveDeviceStatus,
   getDeviceSettings,
   saveDeviceSettings,
   getCalendars,
@@ -31,6 +33,11 @@ const {
   moveScreenMonth,
   resetScreenMonth,
   setScreenMonthOffset,
+  getFirmwareReleases,
+  saveFirmwareRelease,
+  getFirmwareManifest,
+  getFirmwareRelease,
+  getFirmwareBinaryPath,
 } = require("./database");
 const { getEinkData } = require("./eink-data-service");
 const { getCalendarDiagnostics } = require("./ics-service");
@@ -50,7 +57,7 @@ const RENDER_URL =
 const app = express();
 let browserPromise;
 
-app.use(express.json());
+app.use(express.json({ limit: "8mb" }));
 app.use(configureCors);
 app.options("*", (_req, res) => res.sendStatus(204));
 app.use(express.static(FRONTEND_DIST));
@@ -120,12 +127,65 @@ app.post("/api/device/sensors", requireDevice, (req, res, next) => {
   sendJson(res, next, () => saveSensors(req.body || {}));
 });
 
+app.get("/api/device/status", requireAdmin, (_req, res, next) => {
+  sendJson(res, next, getDeviceStatus);
+});
+
+app.post("/api/device/status", requireDevice, (req, res, next) => {
+  sendJson(res, next, () => saveDeviceStatus(req.body || {}));
+});
+
 app.get("/api/device/settings", requireAdminOrDevice, (_req, res, next) => {
   sendJson(res, next, getDeviceSettings);
 });
 
 app.put("/api/device/settings", requireAdmin, (req, res, next) => {
   sendJson(res, next, () => saveDeviceSettings(req.body || {}));
+});
+
+app.get("/api/device/firmware", requireDevice, (req, res, next) => {
+  sendJson(res, next, () =>
+    getFirmwareManifest({
+      currentVersion: req.query.version,
+      baseUrl: getFirmwareBaseUrl(req),
+    }),
+  );
+});
+
+app.get("/api/device/firmware/:id.bin", requireDevice, (req, res, next) => {
+  try {
+    const release = getFirmwareRelease(req.params.id);
+    const binaryPath = getFirmwareBinaryPath(req.params.id);
+
+    if (!release || !binaryPath) {
+      res.status(404).json({
+        error: "NOT_FOUND",
+        message: "Firmware release not found",
+      });
+      return;
+    }
+
+    res
+      .status(200)
+      .type("application/octet-stream")
+      .set({
+        "Cache-Control": "no-store, max-age=0",
+        "Content-Disposition": `attachment; filename="${release.filename}"`,
+        "X-Firmware-Version": release.version,
+        "X-Firmware-Sha256": release.sha256,
+      })
+      .sendFile(binaryPath);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/firmware/releases", requireAdmin, (_req, res, next) => {
+  sendJson(res, next, getFirmwareReleases);
+});
+
+app.post("/api/firmware/releases", requireAdmin, (req, res, next) => {
+  sendJson(res, next, () => saveFirmwareRelease(req.body || {}));
 });
 
 app.get("/api/calendars", requireAdmin, (_req, res, next) => {
@@ -215,6 +275,25 @@ function sendJson(res, next, read) {
     error.statusCode = 400;
     next(error);
   }
+}
+
+function getFirmwareBaseUrl(req) {
+  const publicBaseUrl = String(process.env.PUBLIC_BASE_URL || "").trim().replace(/\/$/, "");
+  if (publicBaseUrl) {
+    return publicBaseUrl;
+  }
+
+  const settingsUrl = getDeviceSettings().serverUrl;
+  if (settingsUrl) {
+    return settingsUrl;
+  }
+
+  const forwardedProto = String(req.get("x-forwarded-proto") || "").split(",")[0].trim();
+  const forwardedHost = String(req.get("x-forwarded-host") || "").split(",")[0].trim();
+  const protocol = forwardedProto || req.protocol || "http";
+  const host = forwardedHost || req.get("host") || `localhost:${PORT}`;
+
+  return `${protocol}://${host}`.replace(/\/$/, "");
 }
 
 const server = app.listen(PORT);

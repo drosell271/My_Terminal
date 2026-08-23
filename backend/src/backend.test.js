@@ -11,10 +11,14 @@ process.env.PUBLIC_BASE_URL = "";
 
 const {
   getSensors,
+  getDeviceStatus,
+  saveDeviceStatus,
   getDeviceSettings,
   getWeatherLocation,
   saveWeatherLocation,
   saveDeviceSettings,
+  saveFirmwareRelease,
+  getFirmwareManifest,
   normalizeServerUrl,
   normalizeStoredServerUrl,
 } = require("./database");
@@ -50,6 +54,62 @@ test("sensor defaults start empty until the device posts a reading", () => {
   assert.equal(sensors.humidityPercent, null);
   assert.equal(sensors.rssi, null);
   assert.equal(sensors.updatedAt, "");
+});
+
+test("device status separates seen time from successful screen refresh", () => {
+  const initial = getDeviceStatus();
+  assert.equal(initial.lastSeenAt, "");
+  assert.equal(initial.lastScreenRefreshAt, "");
+
+  const errorStatus = saveDeviceStatus({
+    firmwareVersion: "test-fw",
+    screenRefreshStatus: "error",
+    refreshReason: "boot",
+    lastError: "download failed",
+  });
+  assert.equal(errorStatus.firmwareVersion, "test-fw");
+  assert.equal(errorStatus.screenRefreshStatus, "error");
+  assert.notEqual(errorStatus.lastSeenAt, "");
+  assert.notEqual(errorStatus.lastRefreshAttemptAt, "");
+  assert.equal(errorStatus.lastScreenRefreshAt, "");
+
+  const successStatus = saveDeviceStatus({
+    firmwareVersion: "test-fw",
+    screenRefreshStatus: "success",
+    refreshReason: "schedule",
+  });
+  assert.equal(successStatus.screenRefreshStatus, "success");
+  assert.notEqual(successStatus.lastScreenRefreshAt, "");
+  assert.equal(successStatus.lastError, "");
+});
+
+test("firmware release produces manifest with sha256 and version comparison", () => {
+  const release = saveFirmwareRelease({
+    version: "1.2.3-test",
+    filename: "firmware.bin",
+    contentBase64: Buffer.from("firmware-image").toString("base64"),
+    notes: "test release",
+    mandatory: true,
+  });
+
+  assert.equal(release.version, "1.2.3-test");
+  assert.equal(release.filename, "firmware.bin");
+  assert.equal(release.size, "firmware-image".length);
+  assert.equal(release.sha256.length, 64);
+
+  const outdated = getFirmwareManifest({
+    currentVersion: "1.2.2-test",
+    baseUrl: "http://device.test",
+  });
+  assert.equal(outdated.updateAvailable, true);
+  assert.equal(outdated.latestVersion, "1.2.3-test");
+  assert.equal(outdated.url.startsWith("http://device.test/api/device/firmware/"), true);
+
+  const current = getFirmwareManifest({
+    currentVersion: "1.2.3-test",
+    baseUrl: "http://device.test",
+  });
+  assert.equal(current.updateAvailable, false);
 });
 
 test("weather units can be configured independently", () => {

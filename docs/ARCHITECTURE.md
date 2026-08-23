@@ -10,6 +10,8 @@ E1002 firmware
   | GET /api/screen.bmp
   | GET /api/device/settings
   | POST /api/device/sensors
+  | POST /api/device/status
+  | GET /api/device/firmware
   v
 Backend Express + SQLite
   |
@@ -27,7 +29,7 @@ Servicios externos: ICS, OpenWeather, OpenHolidays
 El backend vive en `backend/src`:
 
 - `server.js`: servidor Express, rutas HTTP, renderizado Puppeteer y codificacion BMP.
-- `database.js`: esquema SQLite, migraciones simples, valores por defecto y validacion de datos.
+- `database.js`: esquema SQLite, migraciones simples, valores por defecto, releases OTA y validacion de datos.
 - `eink-data-service.js`: compone los datos finales de calendario, clima, festivos y estado de pantalla.
 - `ics-service.js`: descarga, cachea y expande calendarios ICS.
 - `weather-service.js`: consulta OpenWeather y normaliza unidades.
@@ -59,6 +61,8 @@ El firmware vive en `firmware/` y esta pensado para Seeed reTerminal E1002:
 - Descarga del BMP desde el backend.
 - Lectura de ajustes desde `/api/device/settings`.
 - Envio de sensores a `/api/device/sensors`.
+- Reporte de presencia, version y resultado de refresco a `/api/device/status`.
+- Actualizacion OTA con manifest protegido por token, doble particion y validacion SHA-256.
 - Publicacion MQTT usando la configuracion del panel.
 - Deep sleep entre actualizaciones.
 - Botones fisicos para navegar meses.
@@ -88,6 +92,10 @@ El backend usa la tabla `external_cache` para reducir llamadas externas:
 | OpenHolidays | 24 horas |
 
 Si una fuente externa falla, la pantalla intenta seguir funcionando con los datos disponibles. OpenWeather vuelve a una respuesta sin datos climaticos si falta API key o coordenadas validas.
+
+## OTA
+
+El panel de control puede publicar un binario `.bin` de firmware. El backend lo guarda en disco junto a un manifest con version, tamano y SHA-256. La E1002 consulta el manifest en arranques normales o programados, descarga el binario si la version cambia, valida tamano y SHA-256, escribe en el slot OTA alternativo y reinicia. El firmware no comprueba OTA durante una accion de boton para mantener la navegacion de meses inmediata.
 
 ## Seguridad
 
