@@ -383,7 +383,10 @@
 
 .calendar-row {
   display: grid;
-  grid-template-columns: 82px minmax(130px, 0.7fr) minmax(260px, 1.35fr) minmax(170px, 0.75fr) 120px 34px;
+  grid-template-columns: 82px minmax(130px, 0.7fr) minmax(220px, 1.25fr) minmax(130px, 0.8fr) 34px;
+  grid-template-areas:
+    "active name url color delete"
+    ". filters filters filters delete";
   gap: 10px;
   align-items: end;
   min-width: 0;
@@ -394,6 +397,26 @@
 .calendar-row:last-child {
   padding-bottom: 0;
   border-bottom: 0;
+}
+
+.calendar-row .switch-row {
+  grid-area: active;
+}
+
+.calendar-row > .field:nth-of-type(1) {
+  grid-area: name;
+}
+
+.calendar-row > .field:nth-of-type(2) {
+  grid-area: url;
+}
+
+.calendar-row .calendar-keywords {
+  grid-area: filters;
+}
+
+.calendar-row .calendar-color {
+  grid-area: color;
 }
 
 .switch-row {
@@ -449,6 +472,7 @@
 }
 
 .calendar-delete {
+  grid-area: delete;
   align-self: end;
 }
 
@@ -610,9 +634,17 @@
   .field-grid,
   .field-grid--mqtt,
   .firmware-grid,
-  .calendar-row,
   .location-grid {
     grid-template-columns: 1fr;
+  }
+
+  .calendar-row {
+    grid-template-columns: 82px minmax(0, 1fr) 34px;
+    grid-template-areas:
+      "active name delete"
+      ". url delete"
+      ". filters filters"
+      ". color color";
   }
 
   .control-header {
@@ -654,6 +686,16 @@
 
   .calendar-test li {
     grid-template-columns: 1fr;
+  }
+
+  .calendar-row {
+    grid-template-columns: 1fr 34px;
+    grid-template-areas:
+      "active delete"
+      "name name"
+      "url url"
+      "filters filters"
+      "color color";
   }
 }
 
