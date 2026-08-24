@@ -152,13 +152,13 @@ esp_err_t mqtt_app_publish_sensors(const app_settings_t *settings, const sensor_
     if (publish_topic(settings, "battery/voltage", voltage) != ESP_OK) {
         status = ESP_FAIL;
     }
-    if (publish_topic(settings, "temp", temp) != ESP_OK) {
+    if (publish_topic(settings, "sensor/temperature", temp) != ESP_OK) {
         status = ESP_FAIL;
     }
-    if (publish_topic(settings, "hum", humidity) != ESP_OK) {
+    if (publish_topic(settings, "sensor/humidity", humidity) != ESP_OK) {
         status = ESP_FAIL;
     }
-    if (publish_topic(settings, "rssi", rssi) != ESP_OK) {
+    if (publish_topic(settings, "wifi/rssi", rssi) != ESP_OK) {
         status = ESP_FAIL;
     }
 
