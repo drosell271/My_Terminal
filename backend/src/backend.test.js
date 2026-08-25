@@ -21,9 +21,23 @@ const {
   getFirmwareManifest,
   normalizeServerUrl,
   normalizeStoredServerUrl,
+  parseEspAppDesc,
 } = require("./database");
 const { getCalendarEvents, getCalendarDiagnostics, parseIcsEvents } = require("./ics-service");
 const { getWeatherDiagnostics } = require("./weather-service");
+
+function makeSyntheticEspBinary(version = "b017535", projectName = "eink_e1002_firmware") {
+  const buf = Buffer.alloc(512);
+  buf[0] = 0xe9; // ESP image header magic
+  buf.writeUInt32LE(0xabcd5432, 32); // ESP_APP_DESC_MAGIC_WORD
+  buf.write(version, 48, 32, "utf8");
+  buf.write(projectName, 80, 32, "utf8");
+  buf.write("12:00:00", 112, 16, "utf8");
+  buf.write("Aug 25 2026", 128, 16, "utf8");
+  buf.write("v5.4.4", 144, 32, "utf8");
+  Buffer.from("12345678901234567890123456789012").copy(buf, 176);
+  return buf;
+}
 
 test("device settings do not publish loopback URLs by default", () => {
   const settings = getDeviceSettings();
@@ -110,6 +124,42 @@ test("firmware release produces manifest with sha256 and version comparison", ()
     baseUrl: "http://device.test",
   });
   assert.equal(current.updateAvailable, false);
+});
+
+test("firmware parser extracts esp_app_desc metadata and prevents loop when version differs from git hash", () => {
+  const syntheticBin = makeSyntheticEspBinary("b017535", "eink_e1002_firmware");
+  const parsed = parseEspAppDesc(syntheticBin);
+
+  assert.notEqual(parsed, null);
+  assert.equal(parsed.version, "b017535");
+  assert.equal(parsed.projectName, "eink_e1002_firmware");
+  assert.equal(parsed.idfVersion, "v5.4.4");
+
+  const release = saveFirmwareRelease({
+    version: "1.1.0",
+    filename: "firmware.bin",
+    contentBase64: syntheticBin.toString("base64"),
+    notes: "release with custom tag",
+  });
+
+  assert.equal(release.version, "1.1.0");
+  assert.equal(release.compiledVersion, "b017535");
+
+  // Device running git hash "b017535" should match compiledVersion and NOT trigger another update
+  const manifestForRunningDevice = getFirmwareManifest({
+    currentVersion: "b017535",
+    baseUrl: "http://192.168.1.50:3000",
+  });
+  assert.equal(manifestForRunningDevice.updateAvailable, false);
+  assert.equal(manifestForRunningDevice.latestVersion, "1.1.0");
+  assert.equal(manifestForRunningDevice.compiledVersion, "b017535");
+
+  // Device running older version "old-hash" should trigger update
+  const manifestForOldDevice = getFirmwareManifest({
+    currentVersion: "old-hash",
+    baseUrl: "http://192.168.1.50:3000",
+  });
+  assert.equal(manifestForOldDevice.updateAvailable, true);
 });
 
 test("weather units can be configured independently", () => {

@@ -313,6 +313,17 @@ server.on("error", (error) => {
 });
 
 async function getBrowser() {
+  if (browserPromise) {
+    try {
+      const browser = await browserPromise;
+      if (!browser.isConnected()) {
+        browserPromise = null;
+      }
+    } catch (_error) {
+      browserPromise = null;
+    }
+  }
+
   if (!browserPromise) {
     browserPromise = puppeteer.launch({
       headless: "new",

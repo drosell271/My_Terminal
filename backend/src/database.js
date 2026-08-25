@@ -109,6 +109,8 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS firmware_releases (
     id TEXT PRIMARY KEY,
     version TEXT NOT NULL,
+    compiled_version TEXT NOT NULL DEFAULT '',
+    elf_sha256 TEXT NOT NULL DEFAULT '',
     filename TEXT NOT NULL,
     path TEXT NOT NULL,
     sha256 TEXT NOT NULL,
@@ -149,6 +151,16 @@ function migrateSchema() {
     "calendars",
     "excluded_keywords",
     "TEXT NOT NULL DEFAULT '[]'",
+  );
+  ensureColumn(
+    "firmware_releases",
+    "compiled_version",
+    "TEXT NOT NULL DEFAULT ''",
+  );
+  ensureColumn(
+    "firmware_releases",
+    "elf_sha256",
+    "TEXT NOT NULL DEFAULT ''",
   );
 
   backfillWeatherUnitColumns();
@@ -770,7 +782,7 @@ function resetScreenMonth() {
 
 function getFirmwareReleases() {
   return db.prepare(`
-    SELECT id, version, filename, sha256, size, mandatory, notes, active, created_at
+    SELECT id, version, compiled_version, elf_sha256, filename, sha256, size, mandatory, notes, active, created_at
     FROM firmware_releases
     ORDER BY active DESC, created_at DESC
     LIMIT 12
@@ -779,7 +791,7 @@ function getFirmwareReleases() {
 
 function getLatestFirmwareRelease() {
   const row = db.prepare(`
-    SELECT id, version, filename, path, sha256, size, mandatory, notes, active, created_at
+    SELECT id, version, compiled_version, elf_sha256, filename, path, sha256, size, mandatory, notes, active, created_at
     FROM firmware_releases
     WHERE active = 1
     ORDER BY created_at DESC
@@ -791,7 +803,7 @@ function getLatestFirmwareRelease() {
 
 function getFirmwareRelease(id) {
   const row = db.prepare(`
-    SELECT id, version, filename, path, sha256, size, mandatory, notes, active, created_at
+    SELECT id, version, compiled_version, elf_sha256, filename, path, sha256, size, mandatory, notes, active, created_at
     FROM firmware_releases
     WHERE id = ?
   `).get(String(id || ""));
@@ -802,10 +814,14 @@ function getFirmwareRelease(id) {
 function saveFirmwareRelease(payload) {
   const id = randomUUID();
   const now = new Date().toISOString();
-  const version = normalizeFirmwareVersion(payload.version);
+  const binary = decodeFirmwareBinary(payload.contentBase64);
+  const appDesc = parseEspAppDesc(binary);
+  const compiledVersion = appDesc?.version || "";
+  const elfSha256 = appDesc?.elfSha256 || "";
+  const rawVersion = payload.version || compiledVersion;
+  const version = normalizeFirmwareVersion(rawVersion);
   const notes = normalizeText(payload.notes, "", 500, true);
   const filename = normalizeFirmwareFilename(payload.filename, version);
-  const binary = decodeFirmwareBinary(payload.contentBase64);
   const sha256 = createHash("sha256").update(binary).digest("hex");
   const storedFilename = `${id}.bin`;
   const storedPath = path.join(FIRMWARE_DIR, storedFilename);
@@ -818,11 +834,13 @@ function saveFirmwareRelease(payload) {
     db.prepare("UPDATE firmware_releases SET active = 0").run();
     db.prepare(`
       INSERT INTO firmware_releases (
-        id, version, filename, path, sha256, size, mandatory, notes, active, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+        id, version, compiled_version, elf_sha256, filename, path, sha256, size, mandatory, notes, active, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
     `).run(
       id,
       version,
+      compiledVersion,
+      elfSha256,
       filename,
       storedPath,
       sha256,
@@ -849,6 +867,7 @@ function getFirmwareManifest(options = {}) {
     return {
       currentVersion,
       latestVersion: "",
+      compiledVersion: "",
       updateAvailable: false,
       url: "",
       sha256: "",
@@ -861,11 +880,15 @@ function getFirmwareManifest(options = {}) {
 
   const baseUrl = String(options.baseUrl || "").replace(/\/$/, "");
   const pathName = `/api/device/firmware/${latest.id}.bin`;
+  const isMatch =
+    currentVersion === latest.version ||
+    (Boolean(latest.compiledVersion) && currentVersion === latest.compiledVersion);
 
   return {
     currentVersion,
     latestVersion: latest.version,
-    updateAvailable: currentVersion ? currentVersion !== latest.version : true,
+    compiledVersion: latest.compiledVersion || latest.version,
+    updateAvailable: currentVersion ? !isMatch : true,
     url: baseUrl ? `${baseUrl}${pathName}` : pathName,
     sha256: latest.sha256,
     size: latest.size,
@@ -1199,10 +1222,36 @@ function normalizeFirmwareVersion(value) {
   return version;
 }
 
+function parseEspAppDesc(binary) {
+  if (!Buffer.isBuffer(binary) || binary.length < 288) {
+    return null;
+  }
+
+  // Magic word ESP_APP_DESC_MAGIC_WORD = 0xABCD5432 at offset 32 (0x20)
+  const magic = binary.readUInt32LE(32);
+  if (magic !== 0xabcd5432) {
+    return null;
+  }
+
+  const version = binary.toString("utf8", 48, 80).replace(/\0.*$/, "").trim();
+  const projectName = binary.toString("utf8", 80, 112).replace(/\0.*$/, "").trim();
+  const idfVersion = binary.toString("utf8", 144, 176).replace(/\0.*$/, "").trim();
+  const elfSha256 = binary.subarray(176, 208).toString("hex");
+
+  return {
+    version,
+    projectName,
+    idfVersion,
+    elfSha256,
+  };
+}
+
 function firmwareReleaseFromRow(row) {
   return {
     id: row.id,
     version: row.version,
+    compiledVersion: row.compiled_version || "",
+    elfSha256: row.elf_sha256 || "",
     filename: row.filename,
     path: row.path,
     sha256: row.sha256,
@@ -1219,6 +1268,8 @@ function publicFirmwareRelease(row) {
   return {
     id: release.id,
     version: release.version,
+    compiledVersion: release.compiledVersion || "",
+    elfSha256: release.elfSha256 || "",
     filename: release.filename,
     sha256: release.sha256,
     size: release.size,
@@ -1258,4 +1309,5 @@ module.exports = {
   normalizeServerUrl,
   normalizeStoredServerUrl,
   isLoopbackServerUrl,
+  parseEspAppDesc,
 };

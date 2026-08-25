@@ -204,6 +204,25 @@ static void trim_trailing_slash(char *value)
     }
 }
 
+static void sanitize_server_url(char *value)
+{
+    trim_trailing_slash(value);
+    const char *suffix1 = "/api/screen.bmp";
+    size_t len = strlen(value);
+    size_t s1_len = strlen(suffix1);
+    if (len >= s1_len && strcmp(value + len - s1_len, suffix1) == 0) {
+        value[len - s1_len] = '\0';
+        trim_trailing_slash(value);
+    }
+    const char *suffix2 = "/api";
+    len = strlen(value);
+    size_t s2_len = strlen(suffix2);
+    if (len >= s2_len && strcmp(value + len - s2_len, suffix2) == 0) {
+        value[len - s2_len] = '\0';
+        trim_trailing_slash(value);
+    }
+}
+
 static void generate_portal_pin(char *target, size_t target_len)
 {
     uint32_t pin = 10000000U + (esp_random() % 90000000U);
@@ -259,7 +278,7 @@ static esp_err_t save_post_handler(httpd_req_t *req)
     form_value(body, "password", s_submitted_config.wifi_password, sizeof(s_submitted_config.wifi_password));
     form_value(body, "server", s_submitted_config.server_url, sizeof(s_submitted_config.server_url));
     form_value(body, "token", s_submitted_config.device_token, sizeof(s_submitted_config.device_token));
-    trim_trailing_slash(s_submitted_config.server_url);
+    sanitize_server_url(s_submitted_config.server_url);
 
     if (!app_config_is_complete(&s_submitted_config)) {
         httpd_resp_set_status(req, "400 Bad Request");

@@ -41,15 +41,18 @@ idf.py set-target esp32s3
 idf.py build
 ```
 
-Tambien puedes usar el script local:
+Tambien puedes usar el script local indicando la version deseada:
 
 ```powershell
-.\idf-build.ps1
+.\idf-build.ps1 -Version 1.0.0
 ```
+
+Si no se indica `-Version`, se compila con la version definida en `version.txt`.
 
 Los scripts locales prefieren `C:\esp\v5.4.4\esp-idf`. Si necesitas otra ruta, define `MY_TERMINAL_IDF_PATH`.
 
 El build genera `build/eink_e1002_firmware.bin`. Ese fichero es el que puedes publicar desde el panel en `Firmware OTA`.
+
 
 Para flashear, conecta la E1002 por USB, localiza el puerto y ejecuta:
 

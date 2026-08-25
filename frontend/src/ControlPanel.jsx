@@ -94,6 +94,7 @@ export default function ControlPanel() {
   const [calendars, setCalendars] = useState([]);
   const [weatherLocation, setWeatherLocation] = useState(emptyDashboard.weatherLocation);
   const [firmwareForm, setFirmwareForm] = useState(emptyFirmwareForm);
+  const [detectedFirmwareInfo, setDetectedFirmwareInfo] = useState(null);
   const [theme, setTheme] = useState(getStoredTheme);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState("");
@@ -143,6 +144,22 @@ export default function ControlPanel() {
     });
   }
 
+  async function handleFirmwareFileChange(file) {
+    if (!file) {
+      setFirmwareForm((current) => ({ ...current, file: null }));
+      setDetectedFirmwareInfo(null);
+      return;
+    }
+
+    const info = await parseBinaryHeader(file);
+    setDetectedFirmwareInfo(info);
+    setFirmwareForm((current) => ({
+      ...current,
+      file,
+      version: current.version.trim() ? current.version : (info?.version || ""),
+    }));
+  }
+
   async function uploadFirmwareRelease() {
     if (!firmwareForm.file || !firmwareForm.version.trim()) {
       setError("Selecciona un binario y una version");
@@ -170,6 +187,7 @@ export default function ControlPanel() {
         firmwareReleases: [data, ...(current.firmwareReleases || [])].slice(0, 12),
       }));
       setFirmwareForm(emptyFirmwareForm);
+      setDetectedFirmwareInfo(null);
       setNotice("Firmware OTA publicado");
     } catch (requestError) {
       setError(requestError.message);
@@ -563,7 +581,12 @@ export default function ControlPanel() {
           <div className="firmware-panel">
             <div className="firmware-current">
               <span>Release activo</span>
-              <strong>{latestFirmware?.version || "--"}</strong>
+              <strong>
+                {latestFirmware?.version || "--"}
+                {latestFirmware?.compiledVersion && latestFirmware.compiledVersion !== latestFirmware.version
+                  ? ` (${latestFirmware.compiledVersion})`
+                  : ""}
+              </strong>
               <small>
                 {latestFirmware
                   ? `${formatDateTime(latestFirmware.createdAt)} · ${formatBytes(latestFirmware.size)}`
@@ -587,12 +610,15 @@ export default function ControlPanel() {
                   type="file"
                   accept=".bin,application/octet-stream"
                   onChange={(event) =>
-                    setFirmwareForm((current) => ({
-                      ...current,
-                      file: event.target.files?.[0] || null,
-                    }))
+                    handleFirmwareFileChange(event.target.files?.[0] || null)
                   }
                 />
+                {detectedFirmwareInfo?.version ? (
+                  <small style={{ marginTop: "4px", fontSize: "12px", opacity: 0.85 }}>
+                    Versión en binario: <strong>{detectedFirmwareInfo.version}</strong>
+                    {detectedFirmwareInfo.projectName ? ` (${detectedFirmwareInfo.projectName})` : ""}
+                  </small>
+                ) : null}
               </label>
               <label className="switch-row firmware-mandatory">
                 <input
@@ -1182,3 +1208,26 @@ function assignCalendarColors(calendars) {
     ),
   }));
 }
+
+async function parseBinaryHeader(file) {
+  try {
+    const buffer = await file.slice(0, 256).arrayBuffer();
+    const view = new DataView(buffer);
+    if (view.byteLength >= 80 && view.getUint32(32, true) === 0xabcd5432) {
+      const bytes = new Uint8Array(buffer, 48, 32);
+      let nullIndex = bytes.indexOf(0);
+      if (nullIndex === -1) nullIndex = 32;
+      const version = new TextDecoder().decode(bytes.subarray(0, nullIndex)).trim();
+      const projBytes = new Uint8Array(buffer, 80, 32);
+      let projNull = projBytes.indexOf(0);
+      if (projNull === -1) projNull = 32;
+      const projectName = new TextDecoder().decode(projBytes.subarray(0, projNull)).trim();
+      return { version, projectName };
+    }
+  } catch (_e) {
+    // Ignore file read error.
+  }
+
+  return null;
+}
+
