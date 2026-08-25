@@ -200,7 +200,7 @@ function seedDefaults() {
       mqtt_password, mqtt_base_topic, screen_url, updated_at
     ) VALUES (
       1, 'seeed-e1002', '["07:00","12:00","18:00"]', ?, 'mqtt.local', 1883,
-      '', '', 'home/eink/e1002', ?, ?
+      '', '', 'home/eink', ?, ?
     )
   `).run(DEFAULT_TIMEZONE, getConfiguredPublicBaseUrl(), now);
 

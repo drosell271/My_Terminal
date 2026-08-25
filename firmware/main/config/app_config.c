@@ -106,5 +106,5 @@ void app_settings_set_defaults(app_settings_t *settings)
     settings->refresh_hour_count = 3;
     strlcpy(settings->mqtt_host, "mqtt.local", sizeof(settings->mqtt_host));
     settings->mqtt_port = 1883;
-    strlcpy(settings->mqtt_base_topic, "home/eink/e1002", sizeof(settings->mqtt_base_topic));
+    strlcpy(settings->mqtt_base_topic, "home/eink", sizeof(settings->mqtt_base_topic));
 }

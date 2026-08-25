@@ -107,8 +107,19 @@ static bool wait_for_connection(uint32_t timeout_ms)
 
 static esp_err_t publish_topic(const app_settings_t *settings, const char *suffix, const char *payload)
 {
-    char topic[MQTT_TOPIC_MAX_LEN + 32];
-    snprintf(topic, sizeof(topic), "%s/%s", settings->mqtt_base_topic, suffix);
+    char base[MQTT_TOPIC_MAX_LEN + 1];
+    strlcpy(base, settings->mqtt_base_topic, sizeof(base));
+    size_t base_len = strlen(base);
+    while (base_len > 0 && base[base_len - 1] == '/') {
+        base[--base_len] = '\0';
+    }
+
+    char topic[MQTT_TOPIC_MAX_LEN + DEVICE_ID_MAX_LEN + 32];
+    if (settings->device_id[0] != '\0') {
+        snprintf(topic, sizeof(topic), "%s/%s/%s", base, settings->device_id, suffix);
+    } else {
+        snprintf(topic, sizeof(topic), "%s/%s", base, suffix);
+    }
 
     int message_id = esp_mqtt_client_publish(s_client, topic, payload, 0, 1, 0);
     ESP_LOGI(TAG, "MQTT publish %s message_id=%d", topic, message_id);
@@ -143,9 +154,6 @@ esp_err_t mqtt_app_publish_sensors(const app_settings_t *settings, const sensor_
     }
 
     esp_err_t status = ESP_OK;
-    if (publish_topic(settings, "deviceId", settings->device_id) != ESP_OK) {
-        status = ESP_FAIL;
-    }
     if (publish_topic(settings, "battery/percent", battery) != ESP_OK) {
         status = ESP_FAIL;
     }

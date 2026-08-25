@@ -15,12 +15,11 @@ Firmware para el patrón `headless browser` del proyecto:
 - Consulta OTA en `GET /api/device/firmware`, descarga el binario protegido por token, valida tamano y SHA-256, escribe en el slot OTA alternativo y reinicia.
 - Si el backend define `DEVICE_TOKEN`, el mismo token debe configurarse en el portal WiFi. El firmware lo enviara como `X-Device-Token`.
 - Publica sensores por MQTT usando los ajustes recibidos del backend:
-  - `<topic_base>/deviceId`
-  - `<topic_base>/battery/percent`
-  - `<topic_base>/battery/voltage`
-  - `<topic_base>/temp`
-  - `<topic_base>/hum`
-  - `<topic_base>/rssi`
+  - `<topic_base>/<deviceId>/battery/percent`
+  - `<topic_base>/<deviceId>/battery/voltage`
+  - `<topic_base>/<deviceId>/sensor/temperature`
+  - `<topic_base>/<deviceId>/sensor/humidity`
+  - `<topic_base>/<deviceId>/wifi/rssi`
 - Entra en deep sleep despues de cada actualizacion y despierta por temporizador o por cualquier boton.
 - Botones:
   - GPIO5: beep corto, mes anterior, llama `POST /api/screen/month/previous`.
@@ -28,6 +27,16 @@ Firmware para el patrón `headless browser` del proyecto:
   - GPIO3 verde: doble beep corto, vuelve al mes actual, llama `POST /api/screen/month/current`.
   - Tras completar una accion de boton, mantiene una ventana interactiva de 60 segundos para poder pulsar otro boton sin esperar a que despierte. Cada pulsacion reinicia esos 60 segundos.
 - Mantener los tres botones pulsados al arrancar borra WiFi/servidor y vuelve al portal.
+
+## Estructura del código
+
+El componente `main` está organizado en submódulos por dominio:
+
+- **`config/`**: Gestión de NVS y ajustes (`app_config.c`, `app_config.h`).
+- **`display/`**: Driver de pantalla e-paper y decodificador/dither BMP (`display_driver.c`, `display_driver.h`, `bmp_decoder.c`, `bmp_decoder.h`).
+- **`hardware/`**: Control de pulsadores GPIO con debounce, buzzer PWM y lectura de sensores ADC/I2C (`buttons.c`, `buttons.h`, `buzzer.c`, `buzzer.h`, `sensors.c`, `sensors.h`).
+- **`network/`**: Portal de configuración Wi-Fi cautivo, cliente HTTP REST + OTA y cliente MQTT (`wifi_portal.c`, `wifi_portal.h`, `server_api.c`, `server_api.h`, `mqtt_app.c`, `mqtt_app.h`).
+- **`main.c`**: Orquestación del arranque, ciclo de deep sleep y ventana interactiva.
 
 ## Build
 

@@ -1,16 +1,20 @@
 idf_component_register(
   SRCS
-    "app_config.c"
-    "bmp_decoder.c"
-    "buzzer.c"
-    "buttons.c"
-    "display_driver.c"
     "main.c"
-    "mqtt_app.c"
-    "sensors.c"
-    "server_api.c"
-    "wifi_portal.c"
-  INCLUDE_DIRS "include"
+    "config/app_config.c"
+    "display/bmp_decoder.c"
+    "display/display_driver.c"
+    "hardware/buttons.c"
+    "hardware/buzzer.c"
+    "hardware/sensors.c"
+    "network/mqtt_app.c"
+    "network/server_api.c"
+    "network/wifi_portal.c"
+  INCLUDE_DIRS
+    "config"
+    "display"
+    "hardware"
+    "network"
   REQUIRES
     driver
     esp_adc
