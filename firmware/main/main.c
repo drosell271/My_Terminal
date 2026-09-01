@@ -62,12 +62,25 @@ static void mark_running_app_valid(void)
     }
 }
 
+static void get_iso8601_time(char *target, size_t target_len)
+{
+    time_t now = time(NULL);
+    struct tm timeinfo;
+    gmtime_r(&now, &timeinfo);
+    if (timeinfo.tm_year >= (2024 - 1900)) {
+        strftime(target, target_len, "%Y-%m-%dT%H:%M:%SZ", &timeinfo);
+    } else {
+        target[0] = '\0';
+    }
+}
+
 static void post_device_status(
     const char *screen_refresh_status,
     const char *refresh_reason,
     const char *last_error,
     const char *ota_status,
-    const char *ota_version
+    const char *ota_version,
+    const char *timestamp
 )
 {
     if (!app_config_is_complete(&s_device_config)) {
@@ -82,7 +95,8 @@ static void post_device_status(
         refresh_reason,
         last_error,
         ota_status,
-        ota_version
+        ota_version,
+        timestamp
     );
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "Device status post failed: %s", esp_err_to_name(err));
@@ -240,7 +254,7 @@ static void apply_server_settings(void)
     }
 }
 
-static void read_and_send_sensors(void)
+static void read_and_send_sensors(const char *timestamp)
 {
     sensor_reading_t reading;
     if (sensors_read(&reading) != ESP_OK) {
@@ -248,7 +262,7 @@ static void read_and_send_sensors(void)
         return;
     }
 
-    server_api_post_sensors(s_device_config.server_url, s_device_config.device_token, &reading);
+    server_api_post_sensors(s_device_config.server_url, s_device_config.device_token, &reading, timestamp);
     mqtt_app_publish_sensors(&s_settings, &reading);
 }
 
@@ -256,7 +270,7 @@ static void check_for_ota_update(void)
 {
     firmware_manifest_t manifest;
 
-    post_device_status(NULL, NULL, NULL, "checking", "");
+    post_device_status(NULL, NULL, NULL, "checking", "", NULL);
     esp_err_t err = server_api_fetch_firmware_manifest(
         s_device_config.server_url,
         s_device_config.device_token,
@@ -265,17 +279,17 @@ static void check_for_ota_update(void)
     );
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "Firmware update check failed: %s", esp_err_to_name(err));
-        post_device_status(NULL, NULL, NULL, "check_failed", "");
+        post_device_status(NULL, NULL, NULL, "check_failed", "", NULL);
         return;
     }
 
     if (!manifest.update_available) {
-        post_device_status(NULL, NULL, NULL, "current", firmware_version());
+        post_device_status(NULL, NULL, NULL, "current", firmware_version(), NULL);
         return;
     }
 
     ESP_LOGW(TAG, "Firmware update available: %s", manifest.latest_version);
-    post_device_status(NULL, NULL, NULL, "downloading", manifest.latest_version);
+    post_device_status(NULL, NULL, NULL, "downloading", manifest.latest_version, NULL);
     err = server_api_perform_ota_update(
         s_device_config.server_url,
         s_device_config.device_token,
@@ -283,11 +297,11 @@ static void check_for_ota_update(void)
     );
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Firmware update failed: %s", esp_err_to_name(err));
-        post_device_status(NULL, NULL, NULL, "failed", manifest.latest_version);
+        post_device_status(NULL, NULL, NULL, "failed", manifest.latest_version, NULL);
         return;
     }
 
-    post_device_status(NULL, NULL, NULL, "installed", manifest.latest_version);
+    post_device_status(NULL, NULL, NULL, "installed", manifest.latest_version, NULL);
     vTaskDelay(pdMS_TO_TICKS(500));
     esp_restart();
 }
@@ -299,9 +313,11 @@ static esp_err_t refresh_screen(const char *reason)
         return ESP_ERR_INVALID_STATE;
     }
 
-    ESP_LOGI(TAG, "Refresh start: %s", reason);
-    apply_server_settings();
-    read_and_send_sensors();
+    char cycle_time[32] = {0};
+    get_iso8601_time(cycle_time, sizeof(cycle_time));
+
+    ESP_LOGI(TAG, "Refresh start: %s (time: %s)", reason, cycle_time[0] ? cycle_time : "unknown");
+    read_and_send_sensors(cycle_time);
 
     uint8_t *bmp = NULL;
     size_t bmp_len = 0;
@@ -319,10 +335,10 @@ static esp_err_t refresh_screen(const char *reason)
     if (err == ESP_OK) {
         display_driver_sleep();
         ESP_LOGI(TAG, "Refresh complete");
-        post_device_status("success", reason, "", NULL, NULL);
+        post_device_status("success", reason, "", NULL, NULL, cycle_time);
     } else {
         ESP_LOGE(TAG, "Refresh failed: %s", esp_err_to_name(err));
-        post_device_status("error", reason, esp_err_to_name(err), NULL, NULL);
+        post_device_status("error", reason, esp_err_to_name(err), NULL, NULL, cycle_time);
     }
 
     xSemaphoreGive(s_refresh_mutex);
@@ -368,7 +384,7 @@ static uint64_t seconds_until_next_refresh(const app_settings_t *settings)
     localtime_r(&now, &timeinfo);
 
     if (timeinfo.tm_year < (2024 - 1900)) {
-        return DEFAULT_SLEEP_SECONDS;
+        return 300;
     }
 
     time_t best = 0;
@@ -384,10 +400,13 @@ static uint64_t seconds_until_next_refresh(const app_settings_t *settings)
         candidate_tm.tm_hour = hour;
         candidate_tm.tm_min = minute;
         candidate_tm.tm_sec = 0;
+        candidate_tm.tm_isdst = -1;
 
         time_t candidate = mktime(&candidate_tm);
-        if (candidate <= now + MIN_SLEEP_SECONDS) {
-            candidate += 24 * 60 * 60;
+        if (candidate <= now + 180) {
+            candidate_tm.tm_mday += 1;
+            candidate_tm.tm_isdst = -1;
+            candidate = mktime(&candidate_tm);
         }
 
         if (best == 0 || candidate < best) {
@@ -459,9 +478,8 @@ static esp_err_t configure_rtc_wakeup_button(gpio_num_t gpio)
     return ESP_OK;
 }
 
-static void enter_sleep_until_next_refresh(void)
+static void enter_sleep_seconds(uint64_t sleep_seconds)
 {
-    const uint64_t sleep_seconds = seconds_until_next_refresh(&s_settings);
     const uint64_t button_mask =
         (1ULL << BUTTON_GREEN_GPIO) |
         (1ULL << BUTTON_NEXT_GPIO) |
@@ -488,6 +506,12 @@ static void enter_sleep_until_next_refresh(void)
     esp_deep_sleep_start();
 }
 
+static void enter_sleep_until_next_refresh(void)
+{
+    const uint64_t sleep_seconds = seconds_until_next_refresh(&s_settings);
+    enter_sleep_seconds(sleep_seconds);
+}
+
 void app_main(void)
 {
     esp_err_t err = nvs_flash_init();
@@ -512,7 +536,12 @@ void app_main(void)
 
     ESP_ERROR_CHECK(display_driver_init());
     ESP_ERROR_CHECK(wifi_portal_init());
-    ESP_ERROR_CHECK(wifi_portal_connect_or_configure(&s_device_config));
+    err = wifi_portal_connect_or_configure(&s_device_config);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "WiFi connection failed: %s; sleeping 5m before retry", esp_err_to_name(err));
+        enter_sleep_seconds(300);
+        return;
+    }
     mark_running_app_valid();
 
     init_time();
@@ -527,7 +556,7 @@ void app_main(void)
     ESP_ERROR_CHECK(buttons_init(NULL));
 
     apply_server_settings();
-    post_device_status(NULL, NULL, NULL, NULL, NULL);
+    post_device_status(NULL, NULL, NULL, NULL, NULL, NULL);
     const esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
     if (!has_wake_button_action) {
         check_for_ota_update();

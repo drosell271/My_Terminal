@@ -381,8 +381,13 @@ static esp_err_t run_provisioning(device_config_t *config)
 
 esp_err_t wifi_portal_connect_or_configure(device_config_t *config)
 {
-    if (app_config_is_complete(config) && connect_station(config, false) == ESP_OK) {
-        return ESP_OK;
+    if (app_config_is_complete(config)) {
+        esp_err_t err = connect_station(config, false);
+        if (err == ESP_OK) {
+            return ESP_OK;
+        }
+        ESP_LOGW(TAG, "WiFi station connection failed for configured network: %s", config->wifi_ssid);
+        return err;
     }
 
     ESP_LOGW(TAG, "Starting first-run WiFi configuration portal");

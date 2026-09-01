@@ -2,3 +2,4 @@ dependencies:
   idf: '>=5.2'
   espressif/mqtt: ^1.1.0
   espressif/cjson: ^1.7.19
+  tuanpmt/esp_epaper: ^2.0.0

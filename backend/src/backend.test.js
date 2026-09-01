@@ -11,6 +11,7 @@ process.env.PUBLIC_BASE_URL = "";
 
 const {
   getSensors,
+  saveSensors,
   getDeviceStatus,
   saveDeviceStatus,
   getDeviceSettings,
@@ -95,6 +96,28 @@ test("device status separates seen time from successful screen refresh", () => {
   assert.equal(successStatus.screenRefreshStatus, "success");
   assert.notEqual(successStatus.lastScreenRefreshAt, "");
   assert.equal(successStatus.lastError, "");
+});
+
+test("sensor and screen refresh timestamps can be synchronized with device cycle timestamp", () => {
+  const cycleTimestamp = "2026-09-01T07:00:00.000Z";
+
+  const sensors = saveSensors({
+    batteryPercent: 85,
+    temperatureC: 22.5,
+    humidityPercent: 50,
+    rssi: -60,
+    updatedAt: cycleTimestamp,
+  });
+  assert.equal(sensors.updatedAt, cycleTimestamp);
+
+  const status = saveDeviceStatus({
+    firmwareVersion: "test-fw",
+    screenRefreshStatus: "success",
+    refreshReason: "schedule",
+    lastScreenRefreshAt: cycleTimestamp,
+  });
+  assert.equal(status.lastScreenRefreshAt, cycleTimestamp);
+  assert.equal(sensors.updatedAt, status.lastScreenRefreshAt);
 });
 
 test("firmware release produces manifest with sha256 and version comparison", () => {

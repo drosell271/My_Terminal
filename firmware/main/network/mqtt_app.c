@@ -10,7 +10,7 @@
 #include "freertos/task.h"
 #include "mqtt_client.h"
 
-#define MQTT_CONNECT_WAIT_MS 2500
+#define MQTT_CONNECT_WAIT_MS 1000
 
 static const char *TAG = "mqtt_app";
 static esp_mqtt_client_handle_t s_client;

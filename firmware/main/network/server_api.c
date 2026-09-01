@@ -349,14 +349,19 @@ static void json_number_or_null(char *target, size_t target_len, bool has_value,
     snprintf(target, target_len, "%.2f", value);
 }
 
-esp_err_t server_api_post_sensors(const char *server_url, const char *device_token, const sensor_reading_t *reading)
+esp_err_t server_api_post_sensors(
+    const char *server_url,
+    const char *device_token,
+    const sensor_reading_t *reading,
+    const char *timestamp
+)
 {
     char url[SERVER_URL_MAX_LEN + 32];
     char battery[16];
     char temp[16];
     char humidity[16];
     char rssi[16];
-    char body[256];
+    char body[384];
 
     build_url(server_url, "/api/device/sensors", url, sizeof(url));
     json_number_or_null(battery, sizeof(battery), reading->has_battery, reading->battery_percent);
@@ -369,15 +374,28 @@ esp_err_t server_api_post_sensors(const char *server_url, const char *device_tok
         strlcpy(rssi, "null", sizeof(rssi));
     }
 
-    snprintf(
-        body,
-        sizeof(body),
-        "{\"batteryPercent\":%s,\"temperatureC\":%s,\"humidityPercent\":%s,\"rssi\":%s}",
-        battery,
-        temp,
-        humidity,
-        rssi
-    );
+    if (timestamp && timestamp[0] != '\0') {
+        snprintf(
+            body,
+            sizeof(body),
+            "{\"batteryPercent\":%s,\"temperatureC\":%s,\"humidityPercent\":%s,\"rssi\":%s,\"updatedAt\":\"%s\"}",
+            battery,
+            temp,
+            humidity,
+            rssi,
+            timestamp
+        );
+    } else {
+        snprintf(
+            body,
+            sizeof(body),
+            "{\"batteryPercent\":%s,\"temperatureC\":%s,\"humidityPercent\":%s,\"rssi\":%s}",
+            battery,
+            temp,
+            humidity,
+            rssi
+        );
+    }
 
     return http_post_json(url, device_token, body);
 }
@@ -404,11 +422,12 @@ esp_err_t server_api_post_device_status(
     const char *refresh_reason,
     const char *last_error,
     const char *ota_status,
-    const char *ota_version
+    const char *ota_version,
+    const char *timestamp
 )
 {
     char url[SERVER_URL_MAX_LEN + 32];
-    char body[512];
+    char body[640];
 
     build_url(server_url, "/api/device/status", url, sizeof(url));
     snprintf(
@@ -416,13 +435,16 @@ esp_err_t server_api_post_device_status(
         sizeof(body),
         "{\"firmwareVersion\":\"%s\",\"screenRefreshStatus\":\"%s\","
         "\"refreshReason\":\"%s\",\"lastError\":\"%s\",\"otaStatus\":\"%s\","
-        "\"otaVersion\":\"%s\"}",
+        "\"otaVersion\":\"%s\"%s%s%s}",
         firmware_version ? firmware_version : "",
         screen_refresh_status ? screen_refresh_status : "",
         refresh_reason ? refresh_reason : "",
         last_error ? last_error : "",
         ota_status ? ota_status : "",
-        ota_version ? ota_version : ""
+        ota_version ? ota_version : "",
+        (timestamp && timestamp[0] != '\0') ? ",\"lastScreenRefreshAt\":\"" : "",
+        (timestamp && timestamp[0] != '\0') ? timestamp : "",
+        (timestamp && timestamp[0] != '\0') ? "\"" : ""
     );
 
     return http_post_json(url, device_token, body);

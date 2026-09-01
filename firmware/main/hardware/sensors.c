@@ -140,8 +140,8 @@ static esp_err_t read_battery(sensor_reading_t *reading)
     ESP_RETURN_ON_ERROR(adc_oneshot_read(s_adc_handle, BATTERY_ADC_CHANNEL, &raw), TAG, "read battery adc");
 
     int millivolts = 0;
-    if (s_adc_calibrated) {
-        ESP_ERROR_CHECK(adc_cali_raw_to_voltage(s_adc_cali_handle, raw, &millivolts));
+    if (s_adc_calibrated && adc_cali_raw_to_voltage(s_adc_cali_handle, raw, &millivolts) == ESP_OK) {
+        // calibration converted successfully
     } else {
         millivolts = (raw * 3300) / 4095;
     }
@@ -162,7 +162,7 @@ static esp_err_t read_sht4x(sensor_reading_t *reading)
         TAG,
         "sht4x command"
     );
-    vTaskDelay(pdMS_TO_TICKS(10));
+    vTaskDelay(pdMS_TO_TICKS(20));
     ESP_RETURN_ON_ERROR(
         i2c_master_read_from_device(I2C_PORT, SHT4X_ADDR, data, sizeof(data), pdMS_TO_TICKS(100)),
         TAG,

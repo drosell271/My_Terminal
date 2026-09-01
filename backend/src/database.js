@@ -432,13 +432,15 @@ function saveDeviceStatus(payload) {
     : current.screenRefreshStatus;
   const hasOtaStatus = String(payload.otaStatus || "").trim() !== "";
 
+  const refreshTimestamp = String(payload.lastScreenRefreshAt || payload.refreshedAt || payload.updatedAt || "").trim();
+
   const next = {
     firmwareVersion: normalizeText(payload.firmwareVersion, current.firmwareVersion, 64, true),
     lastSeenAt: now,
-    lastRefreshAttemptAt: hasRefreshStatus ? now : current.lastRefreshAttemptAt,
+    lastRefreshAttemptAt: hasRefreshStatus ? (refreshTimestamp || now) : current.lastRefreshAttemptAt,
     lastScreenRefreshAt:
       hasRefreshStatus && screenRefreshStatus === "success"
-        ? now
+        ? (refreshTimestamp || now)
         : current.lastScreenRefreshAt,
     screenRefreshStatus,
     refreshReason: hasRefreshStatus
