@@ -32,6 +32,40 @@ const CALENDAR_COLORS = [
   { name: "Ángel", value: "#FFFF00" },
 ];
 
+const INTERVAL_OPTIONS = [
+  { value: 30, label: "Cada 30 minutos (:00, :30)" },
+  { value: 60, label: "Cada 1 hora (a las :00)" },
+  { value: 120, label: "Cada 2 horas" },
+  { value: 180, label: "Cada 3 horas" },
+  { value: 240, label: "Cada 4 horas" },
+  { value: 360, label: "Cada 6 horas" },
+  { value: 480, label: "Cada 8 horas" },
+  { value: 720, label: "Cada 12 horas" },
+];
+
+function computeIntervalPreview(intervalMinutes, activeHoursEnabled, activeStart, activeEnd) {
+  const step = Number(intervalMinutes) || 60;
+  const [sh, sm] = String(activeStart || "07:00").split(":").map(Number);
+  const [eh, em] = String(activeEnd || "23:00").split(":").map(Number);
+  const startMinutes = (sh || 0) * 60 + (sm || 0);
+  const endMinutes = (eh || 0) * 60 + (em || 0);
+
+  const times = [];
+  for (let m = 0; m < 1440; m += step) {
+    if (activeHoursEnabled) {
+      if (startMinutes <= endMinutes) {
+        if (m < startMinutes || m > endMinutes) continue;
+      } else {
+        if (m < startMinutes && m > endMinutes) continue;
+      }
+    }
+    const h = Math.floor(m / 60) % 24;
+    const min = m % 60;
+    times.push(`${String(h).padStart(2, "0")}:${String(min).padStart(2, "0")}`);
+  }
+  return times.length > 0 ? times : ["08:00"];
+}
+
 const emptyDashboard = {
   sensors: {
     batteryPercent: null,
@@ -54,7 +88,14 @@ const emptyDashboard = {
   },
   settings: {
     deviceId: "",
+    refreshScheduleMode: "hours",
+    refreshIntervalMinutes: 60,
+    refreshActiveHoursEnabled: false,
+    refreshActiveStart: "07:00",
+    refreshActiveEnd: "23:00",
     refreshHours: [],
+    allRefreshHours: [],
+    manualHours: [],
     mqttHost: "",
     mqttPort: 1883,
     mqttUsername: "",
@@ -299,27 +340,49 @@ export default function ControlPanel() {
     }));
   }
 
+  function getManualList(current) {
+    if (Array.isArray(current.manualHours) && current.manualHours.length > 0) {
+      return current.manualHours;
+    }
+    return Array.isArray(current.refreshHours) ? current.refreshHours : [];
+  }
+
   function updateRefreshHour(index, value) {
-    setSettings((current) => ({
-      ...current,
-      refreshHours: current.refreshHours.map((hour, hourIndex) =>
+    setSettings((current) => {
+      const list = getManualList(current);
+      const nextList = list.map((hour, hourIndex) =>
         hourIndex === index ? value : hour,
-      ),
-    }));
+      );
+      return {
+        ...current,
+        manualHours: nextList,
+        refreshHours: nextList,
+      };
+    });
   }
 
   function addRefreshHour() {
-    setSettings((current) => ({
-      ...current,
-      refreshHours: [...current.refreshHours, "08:00"].slice(0, 12),
-    }));
+    setSettings((current) => {
+      const list = getManualList(current);
+      const nextList = [...list, "08:00"].slice(0, 12);
+      return {
+        ...current,
+        manualHours: nextList,
+        refreshHours: nextList,
+      };
+    });
   }
 
   function removeRefreshHour(index) {
-    setSettings((current) => ({
-      ...current,
-      refreshHours: current.refreshHours.filter((_hour, hourIndex) => hourIndex !== index),
-    }));
+    setSettings((current) => {
+      const list = getManualList(current);
+      const nextList = list.filter((_hour, hourIndex) => hourIndex !== index);
+      return {
+        ...current,
+        manualHours: nextList,
+        refreshHours: nextList,
+      };
+    });
   }
 
   function updateCalendar(index, field, value) {
@@ -486,45 +549,153 @@ export default function ControlPanel() {
               />
             </div>
 
-            <div className="time-editor">
-              <div className="subheader">
-                <span>
-                  <Clock size={16} />
-                  Horas de actualizacion
-                </span>
-                <button
-                  className="icon-only"
-                  type="button"
-                  onClick={addRefreshHour}
-                  disabled={settings.refreshHours.length >= 12}
-                  title="Añadir hora"
-                >
-                  <Plus size={17} />
-                </button>
-              </div>
+            {(() => {
+              const manualList = Array.isArray(settings.manualHours) && settings.manualHours.length > 0
+                ? settings.manualHours
+                : (Array.isArray(settings.refreshHours) ? settings.refreshHours : []);
+              const intervalPreview = computeIntervalPreview(
+                settings.refreshIntervalMinutes,
+                settings.refreshActiveHoursEnabled,
+                settings.refreshActiveStart,
+                settings.refreshActiveEnd,
+              );
+              const isInterval = settings.refreshScheduleMode === "interval";
 
-              <div className="time-list">
-                {settings.refreshHours.map((hour, index) => (
-                  <div className="time-row" key={`${hour}-${index}`}>
-                    <input
-                      type="time"
-                      value={hour}
-                      aria-label={`Hora de actualizacion ${index + 1}`}
-                      onChange={(event) => updateRefreshHour(index, event.target.value)}
-                    />
+              return (
+                <div className="time-editor">
+                  <div className="subheader">
+                    <span>
+                      <Clock size={16} />
+                      Programación de actualizaciones
+                    </span>
+                    {!isInterval && (
+                      <button
+                        className="icon-only"
+                        type="button"
+                        onClick={addRefreshHour}
+                        disabled={manualList.length >= 12}
+                        title="Añadir hora"
+                        aria-label="Añadir hora"
+                      >
+                        <Plus size={17} />
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="schedule-mode-toggle" role="radiogroup" aria-label="Modo de programación">
                     <button
-                      className="icon-only"
                       type="button"
-                      onClick={() => removeRefreshHour(index)}
-                      title={`Eliminar ${hour}`}
-                      aria-label={`Eliminar hora ${hour}`}
+                      role="radio"
+                      aria-checked={!isInterval}
+                      className={`schedule-mode-btn ${!isInterval ? "active" : ""}`}
+                      onClick={() => updateSetting("refreshScheduleMode", "hours")}
                     >
-                      <Trash2 size={15} />
+                      Horas fijas
+                    </button>
+                    <button
+                      type="button"
+                      role="radio"
+                      aria-checked={isInterval}
+                      className={`schedule-mode-btn ${isInterval ? "active" : ""}`}
+                      onClick={() => updateSetting("refreshScheduleMode", "interval")}
+                    >
+                      Intervalo regular
                     </button>
                   </div>
-                ))}
-              </div>
-            </div>
+
+                  {isInterval ? (
+                    <div className="interval-editor">
+                      <div className="field">
+                        <label htmlFor="refresh-interval-select">Frecuencia</label>
+                        <select
+                          id="refresh-interval-select"
+                          value={settings.refreshIntervalMinutes || 60}
+                          onChange={(e) => updateSetting("refreshIntervalMinutes", Number(e.target.value))}
+                        >
+                          {INTERVAL_OPTIONS.map((opt) => (
+                            <option key={opt.value} value={opt.value}>
+                              {opt.label}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div className="active-hours-group">
+                        <label className="checkbox-label">
+                          <input
+                            type="checkbox"
+                            checked={Boolean(settings.refreshActiveHoursEnabled)}
+                            onChange={(e) => updateSetting("refreshActiveHoursEnabled", e.target.checked)}
+                          />
+                          <span>Limitar a franja horaria activa (ahorro nocturno)</span>
+                        </label>
+
+                        {settings.refreshActiveHoursEnabled && (
+                          <div className="active-hours-range">
+                            <div className="field">
+                              <label htmlFor="active-start">Desde</label>
+                              <input
+                                id="active-start"
+                                type="time"
+                                value={settings.refreshActiveStart || "07:00"}
+                                onChange={(e) => updateSetting("refreshActiveStart", e.target.value)}
+                              />
+                            </div>
+                            <div className="field">
+                              <label htmlFor="active-end">Hasta</label>
+                              <input
+                                id="active-end"
+                                type="time"
+                                value={settings.refreshActiveEnd || "23:00"}
+                                onChange={(e) => updateSetting("refreshActiveEnd", e.target.value)}
+                              />
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="interval-summary">
+                        <span className="summary-title">
+                          {intervalPreview.length} actualizaciones al día:
+                        </span>
+                        <div className="interval-tags">
+                          {intervalPreview.map((t) => (
+                            <span key={t} className="interval-tag">
+                              {t}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="time-list">
+                      {manualList.map((hour, index) => (
+                        <div className="time-row" key={`${hour}-${index}`}>
+                          <input
+                            type="time"
+                            value={hour}
+                            aria-label={`Hora de actualizacion ${index + 1}`}
+                            onChange={(event) => updateRefreshHour(index, event.target.value)}
+                          />
+                          <button
+                            className="icon-only"
+                            type="button"
+                            onClick={() => removeRefreshHour(index)}
+                            title={`Eliminar ${hour}`}
+                            aria-label={`Eliminar hora ${hour}`}
+                          >
+                            <Trash2 size={15} />
+                          </button>
+                        </div>
+                      ))}
+                      {manualList.length === 0 && (
+                        <p className="empty-hint">No hay horas configuradas. Pulsa + para añadir una hora.</p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
 
             <div className="mqtt-panel">
               <div className="subheader">

@@ -53,6 +53,11 @@ db.exec(`
     id INTEGER PRIMARY KEY CHECK (id = 1),
     device_id TEXT NOT NULL,
     refresh_hours TEXT NOT NULL,
+    refresh_schedule_mode TEXT NOT NULL DEFAULT 'hours',
+    refresh_interval_minutes INTEGER NOT NULL DEFAULT 60,
+    refresh_active_hours_enabled INTEGER NOT NULL DEFAULT 0,
+    refresh_active_start TEXT NOT NULL DEFAULT '07:00',
+    refresh_active_end TEXT NOT NULL DEFAULT '23:00',
     timezone TEXT NOT NULL DEFAULT 'Europe/Madrid',
     mqtt_host TEXT NOT NULL,
     mqtt_port INTEGER NOT NULL,
@@ -146,6 +151,31 @@ function migrateSchema() {
     "device_settings",
     "timezone",
     `TEXT NOT NULL DEFAULT '${DEFAULT_TIMEZONE}'`,
+  );
+  ensureColumn(
+    "device_settings",
+    "refresh_schedule_mode",
+    "TEXT NOT NULL DEFAULT 'hours'",
+  );
+  ensureColumn(
+    "device_settings",
+    "refresh_interval_minutes",
+    "INTEGER NOT NULL DEFAULT 60",
+  );
+  ensureColumn(
+    "device_settings",
+    "refresh_active_hours_enabled",
+    "INTEGER NOT NULL DEFAULT 0",
+  );
+  ensureColumn(
+    "device_settings",
+    "refresh_active_start",
+    "TEXT NOT NULL DEFAULT '07:00'",
+  );
+  ensureColumn(
+    "device_settings",
+    "refresh_active_end",
+    "TEXT NOT NULL DEFAULT '23:00'",
   );
   ensureColumn(
     "calendars",
@@ -491,16 +521,39 @@ function saveDeviceStatus(payload) {
 function getDeviceSettings() {
   const row = db.prepare(`
     SELECT device_id, refresh_hours, timezone, mqtt_host, mqtt_port, mqtt_username,
-           mqtt_password, mqtt_base_topic, screen_url, updated_at
+           mqtt_password, mqtt_base_topic, screen_url, updated_at,
+           refresh_schedule_mode, refresh_interval_minutes, refresh_active_hours_enabled,
+           refresh_active_start, refresh_active_end
     FROM device_settings
     WHERE id = 1
   `).get();
   const serverUrl = normalizeStoredServerUrl(row.screen_url);
   const timezone = normalizeTimezone(row.timezone);
+  const refreshScheduleMode = normalizeScheduleMode(row.refresh_schedule_mode, "hours");
+  const refreshIntervalMinutes = normalizeIntervalMinutes(row.refresh_interval_minutes, 60);
+  const refreshActiveHoursEnabled = Boolean(row.refresh_active_hours_enabled);
+  const refreshActiveStart = normalizeTimeHHMM(row.refresh_active_start, "07:00");
+  const refreshActiveEnd = normalizeTimeHHMM(row.refresh_active_end, "23:00");
+
+  const manualHours = parseJson(row.refresh_hours, ["07:00", "12:00", "18:00"]);
+  const allRefreshHours = refreshScheduleMode === "interval"
+    ? generateIntervalHours(refreshIntervalMinutes, refreshActiveHoursEnabled, refreshActiveStart, refreshActiveEnd)
+    : manualHours;
+
+  const refreshHours = refreshScheduleMode === "interval"
+    ? rotateHoursForDevice(allRefreshHours, timezone)
+    : manualHours;
 
   return {
     deviceId: row.device_id,
-    refreshHours: parseJson(row.refresh_hours, []),
+    refreshScheduleMode,
+    refreshIntervalMinutes,
+    refreshActiveHoursEnabled,
+    refreshActiveStart,
+    refreshActiveEnd,
+    refreshHours,
+    allRefreshHours,
+    manualHours,
     timezone,
     timezonePosix: timezoneToPosix(timezone),
     timezoneOptions: publicTimezoneOptions(),
@@ -517,9 +570,19 @@ function getDeviceSettings() {
 
 function saveDeviceSettings(payload) {
   const current = getDeviceSettings();
+  const scheduleMode = normalizeScheduleMode(payload.refreshScheduleMode, current.refreshScheduleMode);
+  const manualHours = scheduleMode === "hours" && payload.refreshHours !== undefined
+    ? normalizeRefreshHours(payload.refreshHours, current.manualHours)
+    : (payload.manualHours ? normalizeRefreshHours(payload.manualHours, current.manualHours) : current.manualHours);
+
   const next = {
     deviceId: normalizeText(payload.deviceId, current.deviceId, 64),
-    refreshHours: normalizeRefreshHours(payload.refreshHours, current.refreshHours),
+    refreshScheduleMode: scheduleMode,
+    refreshIntervalMinutes: normalizeIntervalMinutes(payload.refreshIntervalMinutes, current.refreshIntervalMinutes),
+    refreshActiveHoursEnabled: normalizeBoolean(payload.refreshActiveHoursEnabled, current.refreshActiveHoursEnabled),
+    refreshActiveStart: normalizeTimeHHMM(payload.refreshActiveStart, current.refreshActiveStart),
+    refreshActiveEnd: normalizeTimeHHMM(payload.refreshActiveEnd, current.refreshActiveEnd),
+    refreshHours: manualHours,
     timezone: normalizeTimezone(payload.timezone, current.timezone),
     mqttHost: normalizeText(payload.mqttHost, current.mqttHost, 255),
     mqttPort: normalizeInteger(payload.mqttPort, current.mqttPort, 1, 65535),
@@ -534,6 +597,11 @@ function saveDeviceSettings(payload) {
     UPDATE device_settings
     SET device_id = ?,
         refresh_hours = ?,
+        refresh_schedule_mode = ?,
+        refresh_interval_minutes = ?,
+        refresh_active_hours_enabled = ?,
+        refresh_active_start = ?,
+        refresh_active_end = ?,
         timezone = ?,
         mqtt_host = ?,
         mqtt_port = ?,
@@ -546,6 +614,11 @@ function saveDeviceSettings(payload) {
   `).run(
     next.deviceId,
     JSON.stringify(next.refreshHours),
+    next.refreshScheduleMode,
+    next.refreshIntervalMinutes,
+    next.refreshActiveHoursEnabled ? 1 : 0,
+    next.refreshActiveStart,
+    next.refreshActiveEnd,
     next.timezone,
     next.mqttHost,
     next.mqttPort,
@@ -985,6 +1058,103 @@ function normalizeRefreshHours(value, fallback) {
   return hours.length > 0 ? hours.slice(0, 12) : fallback;
 }
 
+function normalizeScheduleMode(value, fallback = "hours") {
+  return value === "interval" || value === "hours" ? value : fallback;
+}
+
+const ALLOWED_INTERVAL_MINUTES = [15, 30, 60, 120, 180, 240, 360, 480, 720];
+
+function normalizeIntervalMinutes(value, fallback = 60) {
+  const parsed = Number(value);
+  return ALLOWED_INTERVAL_MINUTES.includes(parsed) ? parsed : fallback;
+}
+
+function normalizeBoolean(value, fallback = false) {
+  if (value === undefined || value === null) {
+    return fallback;
+  }
+  return value === true || value === 1 || value === "true" || value === "1";
+}
+
+function normalizeTimeHHMM(value, fallback = "07:00") {
+  const str = String(value || "").trim();
+  return /^([01]\d|2[0-3]):[0-5]\d$/.test(str) ? str : fallback;
+}
+
+function timeToMinutes(timeStr) {
+  const [h, m] = String(timeStr || "00:00").split(":").map(Number);
+  return (h || 0) * 60 + (m || 0);
+}
+
+function minutesToTime(minutes) {
+  const h = Math.floor(minutes / 60) % 24;
+  const m = minutes % 60;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
+
+function generateIntervalHours(intervalMinutes, activeHoursEnabled = false, activeStart = "07:00", activeEnd = "23:00") {
+  const step = Number(intervalMinutes) || 60;
+  const startMinutes = timeToMinutes(activeStart || "07:00");
+  const endMinutes = timeToMinutes(activeEnd || "23:00");
+
+  const times = [];
+  for (let m = 0; m < 1440; m += step) {
+    if (activeHoursEnabled) {
+      if (startMinutes <= endMinutes) {
+        if (m < startMinutes || m > endMinutes) {
+          continue;
+        }
+      } else {
+        if (m < startMinutes && m > endMinutes) {
+          continue;
+        }
+      }
+    }
+    times.push(minutesToTime(m));
+  }
+
+  return times.length > 0 ? times : ["08:00"];
+}
+
+function getLocalTimeInTimezone(timezone, now = new Date()) {
+  try {
+    const formatter = new Intl.DateTimeFormat("en-GB", {
+      timeZone: timezone,
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    });
+    const parts = formatter.formatToParts(now);
+    const hour = parseInt(parts.find((p) => p.type === "hour")?.value || "0", 10);
+    const minute = parseInt(parts.find((p) => p.type === "minute")?.value || "0", 10);
+    return { hour, minute };
+  } catch {
+    return { hour: now.getHours(), minute: now.getMinutes() };
+  }
+}
+
+function rotateHoursForDevice(hours, timezone, now = new Date()) {
+  if (!Array.isArray(hours) || hours.length <= 1) {
+    return hours;
+  }
+
+  const { hour, minute } = getLocalTimeInTimezone(timezone, now);
+  const nowMinutes = hour * 60 + minute;
+  const upcoming = [];
+  const past = [];
+
+  for (const h of hours) {
+    const m = timeToMinutes(h);
+    if (m >= nowMinutes + 2) {
+      upcoming.push(h);
+    } else {
+      past.push(h);
+    }
+  }
+
+  return [...upcoming, ...past];
+}
+
 function normalizeId(value) {
   const id = String(value || "").trim();
   return /^[a-zA-Z0-9_-]{8,80}$/.test(id) ? id : randomUUID();
@@ -1312,4 +1482,6 @@ module.exports = {
   normalizeStoredServerUrl,
   isLoopbackServerUrl,
   parseEspAppDesc,
+  generateIntervalHours,
+  rotateHoursForDevice,
 };

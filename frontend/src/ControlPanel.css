@@ -311,6 +311,123 @@
   color: var(--primary-fg);
 }
 
+.schedule-mode-toggle {
+  display: inline-flex;
+  gap: 0;
+  padding: 3px;
+  background: var(--input-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  margin-bottom: 12px;
+}
+
+.schedule-mode-btn {
+  padding: 6px 14px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.schedule-mode-btn:hover {
+  color: var(--text);
+}
+
+.schedule-mode-btn.active {
+  background: var(--primary-bg);
+  color: var(--primary-fg);
+  font-weight: 800;
+}
+
+.interval-editor {
+  display: grid;
+  gap: 12px;
+  max-width: 520px;
+}
+
+.active-hours-group {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--text);
+  cursor: pointer;
+  user-select: none;
+}
+
+.checkbox-label input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--border-strong);
+  cursor: pointer;
+}
+
+.active-hours-range {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(110px, 140px));
+  gap: 12px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.interval-summary {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.summary-title {
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.interval-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-height: 100px;
+  overflow-y: auto;
+}
+
+.interval-tag {
+  display: inline-block;
+  padding: 2px 7px;
+  background: var(--input-bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
+.empty-hint {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+
 .mqtt-panel {
   border-top: 1px solid var(--border);
   padding-top: 12px;

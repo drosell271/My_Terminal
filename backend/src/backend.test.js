@@ -23,6 +23,8 @@ const {
   normalizeServerUrl,
   normalizeStoredServerUrl,
   parseEspAppDesc,
+  generateIntervalHours,
+  rotateHoursForDevice,
 } = require("./database");
 const { getCalendarEvents, getCalendarDiagnostics, parseIcsEvents } = require("./ics-service");
 const { getWeatherDiagnostics } = require("./weather-service");
@@ -59,6 +61,77 @@ test("device timezone can be configured and falls back on invalid values", () =>
   const unchanged = saveDeviceSettings({ timezone: "Invalid/Timezone" });
   assert.equal(unchanged.timezone, "UTC");
   assert.equal(unchanged.timezonePosix, "UTC0");
+});
+
+test("generateIntervalHours calculates times correctly for regular and windowed intervals", () => {
+  // 60 minutes default -> 24 hours (00:00 to 23:00)
+  const hourly = generateIntervalHours(60, false);
+  assert.equal(hourly.length, 24);
+  assert.equal(hourly[0], "00:00");
+  assert.equal(hourly[1], "01:00");
+  assert.equal(hourly[23], "23:00");
+
+  // 30 minutes -> 48 entries
+  const halfHourly = generateIntervalHours(30, false);
+  assert.equal(halfHourly.length, 48);
+  assert.equal(halfHourly[0], "00:00");
+  assert.equal(halfHourly[1], "00:30");
+
+  // 60 minutes with daytime window 07:00 to 23:00 -> 17 entries
+  const daytimeHourly = generateIntervalHours(60, true, "07:00", "23:00");
+  assert.equal(daytimeHourly.length, 17);
+  assert.equal(daytimeHourly[0], "07:00");
+  assert.equal(daytimeHourly[daytimeHourly.length - 1], "23:00");
+
+  // 120 minutes with daytime window 08:00 to 20:00 -> 7 entries (08, 10, 12, 14, 16, 18, 20)
+  const biHourly = generateIntervalHours(120, true, "08:00", "20:00");
+  assert.deepEqual(biHourly, ["08:00", "10:00", "12:00", "14:00", "16:00", "18:00", "20:00"]);
+});
+
+test("rotateHoursForDevice rotates hours list so next upcoming hours come first", () => {
+  const hours = ["00:00", "06:00", "12:00", "18:00"];
+  // Pretend now is 10:00 in UTC
+  const fixedNow = new Date("2026-09-06T10:00:00Z");
+  const rotated = rotateHoursForDevice(hours, "UTC", fixedNow);
+  // Next upcoming after 10:00 is 12:00, then 18:00, then 00:00, 06:00
+  assert.deepEqual(rotated, ["12:00", "18:00", "00:00", "06:00"]);
+});
+
+test("device settings can switch between manual hours and interval mode while preserving manual hours", () => {
+  // Set manual hours
+  const manual = saveDeviceSettings({
+    refreshScheduleMode: "hours",
+    refreshHours: ["07:00", "12:00", "19:00"],
+  });
+  assert.equal(manual.refreshScheduleMode, "hours");
+  assert.deepEqual(manual.manualHours, ["07:00", "12:00", "19:00"]);
+  assert.deepEqual(manual.refreshHours, ["07:00", "12:00", "19:00"]);
+
+  // Switch to interval mode (every 1 hour with active window 08:00 to 22:00)
+  const interval = saveDeviceSettings({
+    refreshScheduleMode: "interval",
+    refreshIntervalMinutes: 60,
+    refreshActiveHoursEnabled: true,
+    refreshActiveStart: "08:00",
+    refreshActiveEnd: "22:00",
+  });
+  assert.equal(interval.refreshScheduleMode, "interval");
+  assert.equal(interval.refreshIntervalMinutes, 60);
+  assert.equal(interval.refreshActiveHoursEnabled, true);
+  assert.equal(interval.refreshActiveStart, "08:00");
+  assert.equal(interval.refreshActiveEnd, "22:00");
+  assert.equal(interval.allRefreshHours.length, 15);
+  assert.equal(interval.allRefreshHours[0], "08:00");
+  assert.equal(interval.allRefreshHours[14], "22:00");
+  // Manual hours still preserved
+  assert.deepEqual(interval.manualHours, ["07:00", "12:00", "19:00"]);
+
+  // Switch back to manual hours
+  const backToManual = saveDeviceSettings({
+    refreshScheduleMode: "hours",
+  });
+  assert.equal(backToManual.refreshScheduleMode, "hours");
+  assert.deepEqual(backToManual.refreshHours, ["07:00", "12:00", "19:00"]);
 });
 
 test("sensor defaults start empty until the device posts a reading", () => {

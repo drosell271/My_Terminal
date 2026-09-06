@@ -199,7 +199,14 @@ Requiere administrador o dispositivo si `DEVICE_TOKEN` esta configurado.
 ```json
 {
   "deviceId": "seeed-e1002",
+  "refreshScheduleMode": "hours",
+  "refreshIntervalMinutes": 60,
+  "refreshActiveHoursEnabled": false,
+  "refreshActiveStart": "07:00",
+  "refreshActiveEnd": "23:00",
   "refreshHours": ["07:00", "12:00", "18:00"],
+  "allRefreshHours": ["07:00", "12:00", "18:00"],
+  "manualHours": ["07:00", "12:00", "18:00"],
   "timezone": "Europe/Madrid",
   "timezonePosix": "CET-1CEST,M3.5.0/2,M10.5.0/3",
   "timezoneOptions": [],
@@ -221,6 +228,11 @@ Requiere administrador.
 ```json
 {
   "deviceId": "seeed-e1002",
+  "refreshScheduleMode": "interval",
+  "refreshIntervalMinutes": 60,
+  "refreshActiveHoursEnabled": true,
+  "refreshActiveStart": "07:00",
+  "refreshActiveEnd": "23:00",
   "refreshHours": ["07:00", "12:00", "18:00"],
   "timezone": "Europe/Madrid",
   "mqttHost": "mqtt.local",
@@ -234,7 +246,12 @@ Requiere administrador.
 
 Notas:
 
-- `refreshHours` acepta hasta 12 horas `HH:mm`.
+- `refreshScheduleMode`: `"hours"` (horas manuales fijas) o `"interval"` (intervalo regular).
+- `refreshIntervalMinutes`: minutos entre actualizaciones en modo intervalo (30, 60, 120, 180, 240, 360, 480, 720).
+- `refreshActiveHoursEnabled`: si es true, limita las actualizaciones a la franja horaria activa.
+- `refreshActiveStart` y `refreshActiveEnd`: horas en formato `HH:mm` de inicio y fin de la franja activa.
+- `refreshHours`: horas calculadas o fijas. En modo intervalo con más de 12 horas, se rota en una ventana deslizante para que el ESP32 siempre despierte a la siguiente hora prevista.
+- `manualHours`: horas guardadas para el modo manual (se preservan al cambiar de modo).
 - `timezone` debe estar entre las opciones expuestas por `GET /api/device/settings`.
 - `serverUrl` debe empezar por `http://` o `https://`.
 - Si se envia una URL terminada en `/api/screen.bmp`, se guarda solo la base.
