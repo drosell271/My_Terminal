@@ -61,4 +61,4 @@ VOLUME ["/data"]
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
   CMD ["node", "-e", "const port=process.env.PORT||3000; fetch('http://127.0.0.1:'+port+'/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
 
-CMD ["npm", "run", "start", "--workspace", "backend"]
+CMD ["node", "backend/src/server.js"]

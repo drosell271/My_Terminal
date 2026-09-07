@@ -6,6 +6,8 @@ loadEnv();
 const express = require("express");
 const puppeteer = require("puppeteer");
 const sharp = require("sharp");
+
+sharp.cache(false);
 const fs = require("node:fs");
 const {
   configureCors,
@@ -55,7 +57,8 @@ const RENDER_URL =
     : "http://127.0.0.1:5173/eink");
 
 const app = express();
-let browserPromise;
+let activeBrowser = null;
+let renderQueue = Promise.resolve();
 
 app.use(express.json({ limit: "8mb" }));
 app.use(configureCors);
@@ -312,38 +315,42 @@ server.on("error", (error) => {
   throw error;
 });
 
-async function getBrowser() {
-  if (browserPromise) {
-    try {
-      const browser = await browserPromise;
-      if (!browser.isConnected()) {
-        browserPromise = null;
-      }
-    } catch (_error) {
-      browserPromise = null;
-    }
-  }
+function renderUrlToBmp(url) {
+  const task = renderQueue.then(
+    () => performRender(url),
+    () => performRender(url),
+  );
+  renderQueue = task.catch(() => {});
+  return task;
+}
 
-  if (!browserPromise) {
-    browserPromise = puppeteer.launch({
+async function performRender(url) {
+  let browser = null;
+  let page = null;
+
+  try {
+    browser = await puppeteer.launch({
       headless: "new",
-      args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
+      args: [
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-extensions",
+        "--disable-component-update",
+        "--disable-background-networking",
+        "--mute-audio",
+        "--no-first-run",
+      ],
       defaultViewport: {
         width: EINK_WIDTH,
         height: EINK_HEIGHT,
         deviceScaleFactor: 1,
       },
     });
-  }
+    activeBrowser = browser;
 
-  return browserPromise;
-}
+    page = await browser.newPage();
 
-async function renderUrlToBmp(url) {
-  const browser = await getBrowser();
-  const page = await browser.newPage();
-
-  try {
     await page.setViewport({
       width: EINK_WIDTH,
       height: EINK_HEIGHT,
@@ -385,7 +392,16 @@ async function renderUrlToBmp(url) {
 
     return encodeRgbToBmp(data, info.width, info.height, info.channels);
   } finally {
-    await page.close();
+    if (page) {
+      await page.goto("about:blank").catch(() => {});
+      await page.close().catch(() => {});
+    }
+    if (browser) {
+      await browser.close().catch(() => {});
+    }
+    if (activeBrowser === browser) {
+      activeBrowser = null;
+    }
   }
 }
 
@@ -434,12 +450,14 @@ function encodeRgbToBmp(rgb, width, height, channels) {
 }
 
 async function closeBrowser() {
-  if (!browserPromise) {
-    return;
+  if (activeBrowser) {
+    try {
+      await activeBrowser.close();
+    } catch (_error) {
+      // ignore
+    }
+    activeBrowser = null;
   }
-
-  const browser = await browserPromise;
-  await browser.close();
 }
 
 process.on("SIGINT", async () => {

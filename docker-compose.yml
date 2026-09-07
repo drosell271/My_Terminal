@@ -7,6 +7,8 @@ services:
     pull_policy: build
     container_name: my_terminal
     restart: unless-stopped
+    init: true
+    mem_limit: 1g
     ports:
       - "${PORT:-3000}:${PORT:-3000}"
     environment:
