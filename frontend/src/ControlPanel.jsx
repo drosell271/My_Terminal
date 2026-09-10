@@ -506,7 +506,7 @@ export default function ControlPanel() {
         <SensorMetric
           icon={Droplets}
           label="Humedad"
-          value={formatPercent(dashboard.sensors.humidityPercent)}
+          value={formatHumidity(dashboard.sensors.humidityPercent)}
         />
         <SensorMetric
           icon={Wifi}
@@ -1257,7 +1257,11 @@ function formatPercent(value) {
 }
 
 function formatDegrees(value) {
-  return value === null || value === undefined ? "--" : `${Number(value).toFixed(1)}°C`;
+  return value === null || value === undefined ? "--" : `${Number(value).toFixed(2)}°C`;
+}
+
+function formatHumidity(value) {
+  return value === null || value === undefined ? "--" : `${Number(value).toFixed(2)}%`;
 }
 
 function formatRssi(value) {

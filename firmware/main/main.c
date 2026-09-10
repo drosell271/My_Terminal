@@ -262,6 +262,20 @@ static void read_and_send_sensors(const char *timestamp)
         return;
     }
 
+    if (reading.has_temperature && reading.has_humidity) {
+        ESP_LOGI(TAG, "Sensors: T=%.2f C, RH=%.2f%%, Batt=%.2f V (%.1f%%), RSSI=%d dBm",
+                 reading.temperature_c,
+                 reading.humidity_percent,
+                 reading.battery_voltage,
+                 reading.battery_percent,
+                 reading.rssi);
+    } else {
+        ESP_LOGI(TAG, "Sensors: Batt=%.2f V (%.1f%%), RSSI=%d dBm",
+                 reading.battery_voltage,
+                 reading.battery_percent,
+                 reading.rssi);
+    }
+
     server_api_post_sensors(s_device_config.server_url, s_device_config.device_token, &reading, timestamp);
     mqtt_app_publish_sensors(&s_settings, &reading);
 }

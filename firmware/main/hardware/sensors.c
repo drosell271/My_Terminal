@@ -156,31 +156,46 @@ static esp_err_t read_sht4x(sensor_reading_t *reading)
 {
     uint8_t command = SHT4X_MEASURE_HIGH_PRECISION;
     uint8_t data[6] = {0};
+    esp_err_t err = ESP_FAIL;
 
-    ESP_RETURN_ON_ERROR(
-        i2c_master_write_to_device(I2C_PORT, SHT4X_ADDR, &command, 1, pdMS_TO_TICKS(100)),
-        TAG,
-        "sht4x command"
-    );
-    vTaskDelay(pdMS_TO_TICKS(20));
-    ESP_RETURN_ON_ERROR(
-        i2c_master_read_from_device(I2C_PORT, SHT4X_ADDR, data, sizeof(data), pdMS_TO_TICKS(100)),
-        TAG,
-        "sht4x read"
-    );
+    // Retry up to 3 times in case of bus glitches or clock stretching
+    for (int attempt = 0; attempt < 3; attempt++) {
+        err = i2c_master_write_to_device(I2C_PORT, SHT4X_ADDR, &command, 1, pdMS_TO_TICKS(100));
+        if (err != ESP_OK) {
+            vTaskDelay(pdMS_TO_TICKS(10));
+            continue;
+        }
 
-    if (sht4x_crc(data) != data[2] || sht4x_crc(data + 3) != data[5]) {
-        return ESP_ERR_INVALID_CRC;
+        // SHT4x max conversion duration for High Precision (0xFD) is 8.2 ms.
+        // 20 ms provides ample margin (>2 ticks) avoiding NACKs without causing self-heating.
+        vTaskDelay(pdMS_TO_TICKS(20));
+
+        err = i2c_master_read_from_device(I2C_PORT, SHT4X_ADDR, data, sizeof(data), pdMS_TO_TICKS(100));
+        if (err != ESP_OK) {
+            vTaskDelay(pdMS_TO_TICKS(10));
+            continue;
+        }
+
+        if (sht4x_crc(data) != data[2] || sht4x_crc(data + 3) != data[5]) {
+            err = ESP_ERR_INVALID_CRC;
+            vTaskDelay(pdMS_TO_TICKS(10));
+            continue;
+        }
+
+        uint16_t raw_temp = ((uint16_t)data[0] << 8) | data[1];
+        uint16_t raw_hum = ((uint16_t)data[3] << 8) | data[4];
+
+        // Sensirion factory calibration formulas (no artificial offsets, no Magnus psychrometric modifications)
+        reading->temperature_c = -45.0f + 175.0f * ((float)raw_temp / 65535.0f);
+        reading->humidity_percent = -6.0f + 125.0f * ((float)raw_hum / 65535.0f);
+        reading->humidity_percent = fminf(100.0f, fmaxf(0.0f, reading->humidity_percent));
+        reading->has_temperature = true;
+        reading->has_humidity = true;
+        return ESP_OK;
     }
 
-    uint16_t raw_temp = ((uint16_t)data[0] << 8) | data[1];
-    uint16_t raw_hum = ((uint16_t)data[3] << 8) | data[4];
-    reading->temperature_c = -45.0f + 175.0f * ((float)raw_temp / 65535.0f);
-    reading->humidity_percent = -6.0f + 125.0f * ((float)raw_hum / 65535.0f);
-    reading->humidity_percent = fminf(100.0f, fmaxf(0.0f, reading->humidity_percent));
-    reading->has_temperature = true;
-    reading->has_humidity = true;
-    return ESP_OK;
+    ESP_LOGW(TAG, "SHT4x read failed after retries: %s", esp_err_to_name(err));
+    return err;
 }
 
 static void read_rssi(sensor_reading_t *reading)
