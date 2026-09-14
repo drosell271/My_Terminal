@@ -340,13 +340,13 @@ esp_err_t server_api_download_screen_bmp(const char *server_url, const char *dev
     return http_get_buffer(url, device_token, BMP_MAX_BYTES, bmp, bmp_len);
 }
 
-static void json_number_or_null(char *target, size_t target_len, bool has_value, float value)
+static void json_number_or_null(char *target, size_t target_len, bool has_value, float value, int decimals)
 {
     if (!has_value) {
         strlcpy(target, "null", target_len);
         return;
     }
-    snprintf(target, target_len, "%.2f", value);
+    snprintf(target, target_len, "%.*f", decimals, value);
 }
 
 esp_err_t server_api_post_sensors(
@@ -361,12 +361,13 @@ esp_err_t server_api_post_sensors(
     char temp[16];
     char humidity[16];
     char rssi[16];
+    char mac_str[32];
     char body[384];
 
     build_url(server_url, "/api/device/sensors", url, sizeof(url));
-    json_number_or_null(battery, sizeof(battery), reading->has_battery, reading->battery_percent);
-    json_number_or_null(temp, sizeof(temp), reading->has_temperature, reading->temperature_c);
-    json_number_or_null(humidity, sizeof(humidity), reading->has_humidity, reading->humidity_percent);
+    json_number_or_null(battery, sizeof(battery), reading->has_battery, reading->battery_percent, 2);
+    json_number_or_null(temp, sizeof(temp), reading->has_temperature, reading->temperature_c, 1);
+    json_number_or_null(humidity, sizeof(humidity), reading->has_humidity, reading->humidity_percent, 1);
 
     if (reading->has_rssi) {
         snprintf(rssi, sizeof(rssi), "%d", reading->rssi);
@@ -374,26 +375,34 @@ esp_err_t server_api_post_sensors(
         strlcpy(rssi, "null", sizeof(rssi));
     }
 
+    if (reading->has_mac && reading->mac[0] != '\0') {
+        snprintf(mac_str, sizeof(mac_str), "\"%s\"", reading->mac);
+    } else {
+        strlcpy(mac_str, "null", sizeof(mac_str));
+    }
+
     if (timestamp && timestamp[0] != '\0') {
         snprintf(
             body,
             sizeof(body),
-            "{\"batteryPercent\":%s,\"temperatureC\":%s,\"humidityPercent\":%s,\"rssi\":%s,\"updatedAt\":\"%s\"}",
+            "{\"batteryPercent\":%s,\"temperatureC\":%s,\"humidityPercent\":%s,\"rssi\":%s,\"mac\":%s,\"updatedAt\":\"%s\"}",
             battery,
             temp,
             humidity,
             rssi,
+            mac_str,
             timestamp
         );
     } else {
         snprintf(
             body,
             sizeof(body),
-            "{\"batteryPercent\":%s,\"temperatureC\":%s,\"humidityPercent\":%s,\"rssi\":%s}",
+            "{\"batteryPercent\":%s,\"temperatureC\":%s,\"humidityPercent\":%s,\"rssi\":%s,\"mac\":%s}",
             battery,
             temp,
             humidity,
-            rssi
+            rssi,
+            mac_str
         );
     }
 

@@ -9,6 +9,7 @@
 #include "esp_adc/adc_oneshot.h"
 #include "esp_check.h"
 #include "esp_log.h"
+#include "esp_mac.h"
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -198,12 +199,23 @@ static esp_err_t read_sht4x(sensor_reading_t *reading)
     return err;
 }
 
-static void read_rssi(sensor_reading_t *reading)
+static void read_wifi_details(sensor_reading_t *reading)
 {
     wifi_ap_record_t ap_info;
     if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
         reading->rssi = ap_info.rssi;
         reading->has_rssi = true;
+    }
+
+    uint8_t mac[6];
+    if (esp_read_mac(mac, ESP_MAC_WIFI_STA) == ESP_OK) {
+        snprintf(
+            reading->mac,
+            sizeof(reading->mac),
+            "%02X:%02X:%02X:%02X:%02X:%02X",
+            mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]
+        );
+        reading->has_mac = true;
     }
 }
 
@@ -221,8 +233,8 @@ esp_err_t sensors_read(sensor_reading_t *reading)
         ESP_LOGW(TAG, "SHT4x read failed: %s", esp_err_to_name(sht_err));
     }
 
-    read_rssi(reading);
-    return (battery_err == ESP_OK || sht_err == ESP_OK || reading->has_rssi) ? ESP_OK : ESP_FAIL;
+    read_wifi_details(reading);
+    return (battery_err == ESP_OK || sht_err == ESP_OK || reading->has_rssi || reading->has_mac) ? ESP_OK : ESP_FAIL;
 }
 
 void sensors_sleep(void)

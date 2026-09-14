@@ -32,6 +32,7 @@ db.exec(`
     temperature_c REAL,
     humidity_percent REAL,
     rssi INTEGER,
+    mac TEXT,
     updated_at TEXT NOT NULL
   );
 
@@ -133,6 +134,11 @@ sanitizeUnsafeServerUrl();
 
 function migrateSchema() {
   ensureColumn(
+    "sensor_readings",
+    "mac",
+    "TEXT",
+  );
+  ensureColumn(
     "weather_location",
     "openweather_api_key",
     "TEXT NOT NULL DEFAULT ''",
@@ -212,8 +218,8 @@ function seedDefaults() {
 
   db.prepare(`
     INSERT OR IGNORE INTO sensor_readings (
-      id, battery_percent, temperature_c, humidity_percent, rssi, updated_at
-    ) VALUES (1, NULL, NULL, NULL, NULL, '')
+      id, battery_percent, temperature_c, humidity_percent, rssi, mac, updated_at
+    ) VALUES (1, NULL, NULL, NULL, NULL, NULL, '')
   `).run();
 
   db.prepare(`
@@ -274,6 +280,7 @@ function clearDefaultSensorSeed() {
         temperature_c = NULL,
         humidity_percent = NULL,
         rssi = NULL,
+        mac = NULL,
         updated_at = ''
     WHERE id = 1
       AND battery_percent = 86
@@ -361,7 +368,7 @@ function getDashboard() {
 
 function getSensors() {
   const row = db.prepare(`
-    SELECT battery_percent, temperature_c, humidity_percent, rssi, updated_at
+    SELECT battery_percent, temperature_c, humidity_percent, rssi, mac, updated_at
     FROM sensor_readings
     WHERE id = 1
   `).get();
@@ -372,15 +379,17 @@ function getSensors() {
       temperatureC: null,
       humidityPercent: null,
       rssi: null,
+      mac: null,
       updatedAt: null,
     };
   }
 
   return {
     batteryPercent: row.battery_percent,
-    temperatureC: row.temperature_c,
-    humidityPercent: row.humidity_percent,
+    temperatureC: roundToOneDecimal(row.temperature_c),
+    humidityPercent: roundToOneDecimal(row.humidity_percent),
     rssi: row.rssi,
+    mac: row.mac || null,
     updatedAt: row.updated_at,
   };
 }
@@ -395,15 +404,19 @@ function saveSensors(payload) {
     temperatureC:
       payload.temperatureC === undefined
         ? current.temperatureC
-        : normalizeOptionalNumber(payload.temperatureC, -40, 85),
+        : normalizeOptionalNumber(payload.temperatureC, -40, 85, 1),
     humidityPercent:
       payload.humidityPercent === undefined
         ? current.humidityPercent
-        : normalizeOptionalNumber(payload.humidityPercent, 0, 100),
+        : normalizeOptionalNumber(payload.humidityPercent, 0, 100, 1),
     rssi:
       payload.rssi === undefined
         ? current.rssi
         : normalizeOptionalInteger(payload.rssi, -150, 20),
+    mac:
+      payload.mac === undefined
+        ? current.mac
+        : normalizeOptionalMac(payload.mac),
     updatedAt: payload.updatedAt || new Date().toISOString(),
   };
 
@@ -413,6 +426,7 @@ function saveSensors(payload) {
         temperature_c = ?,
         humidity_percent = ?,
         rssi = ?,
+        mac = ?,
         updated_at = ?
     WHERE id = 1
   `).run(
@@ -420,6 +434,7 @@ function saveSensors(payload) {
     next.temperatureC,
     next.humidityPercent,
     next.rssi,
+    next.mac,
     next.updatedAt,
   );
 
@@ -1270,7 +1285,11 @@ function normalizeOptionalUrl(value) {
   return url.slice(0, 500);
 }
 
-function normalizeOptionalNumber(value, min, max) {
+function roundToOneDecimal(value) {
+  return value === null || value === undefined ? null : Number(Number(value).toFixed(1));
+}
+
+function normalizeOptionalNumber(value, min, max, decimals = null) {
   if (value === undefined || value === null || value === "") {
     return null;
   }
@@ -1282,7 +1301,26 @@ function normalizeOptionalNumber(value, min, max) {
     throw new Error(`Number must be between ${min} and ${max}`);
   }
 
-  return number;
+  return decimals !== null ? Number(number.toFixed(decimals)) : number;
+}
+
+function normalizeOptionalMac(value) {
+  if (value === undefined || value === null || value === "") {
+    return null;
+  }
+
+  const str = String(value).trim().toUpperCase();
+  if (/^([0-9A-F]{2}:){5}[0-9A-F]{2}$/.test(str)) {
+    return str;
+  }
+  if (/^([0-9A-F]{2}-){5}[0-9A-F]{2}$/.test(str)) {
+    return str.replace(/-/g, ":");
+  }
+  if (/^[0-9A-F]{12}$/.test(str)) {
+    return str.match(/.{2}/g).join(":");
+  }
+
+  throw new Error("Invalid MAC address format");
 }
 
 function normalizeTemperatureUnit(value, fallback = "celsius") {

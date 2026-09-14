@@ -20,6 +20,7 @@ Firmware para el patrón `headless browser` del proyecto:
   - `<topic_base>/<deviceId>/sensor/temperature`
   - `<topic_base>/<deviceId>/sensor/humidity`
   - `<topic_base>/<deviceId>/wifi/rssi`
+  - `<topic_base>/<deviceId>/wifi/mac`
 - Entra en deep sleep despues de cada actualizacion y despierta por temporizador o por cualquier boton.
 - Botones:
   - GPIO5: beep corto, mes anterior, llama `POST /api/screen/month/previous`.

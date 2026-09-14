@@ -72,6 +72,7 @@ const emptyDashboard = {
     temperatureC: null,
     humidityPercent: null,
     rssi: null,
+    mac: null,
     updatedAt: null,
   },
   deviceStatus: {
@@ -512,6 +513,7 @@ export default function ControlPanel() {
           icon={Wifi}
           label="RSSI"
           value={formatRssi(dashboard.sensors.rssi)}
+          detail={dashboard.sensors.mac ? `MAC: ${dashboard.sensors.mac}` : null}
         />
       </section>
 
@@ -1257,11 +1259,11 @@ function formatPercent(value) {
 }
 
 function formatDegrees(value) {
-  return value === null || value === undefined ? "--" : `${Number(value).toFixed(2)}°C`;
+  return value === null || value === undefined ? "--" : `${Number(value).toFixed(1)}°C`;
 }
 
 function formatHumidity(value) {
-  return value === null || value === undefined ? "--" : `${Number(value).toFixed(2)}%`;
+  return value === null || value === undefined ? "--" : `${Number(value).toFixed(1)}%`;
 }
 
 function formatRssi(value) {

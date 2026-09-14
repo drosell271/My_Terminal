@@ -132,6 +132,7 @@ Requiere administrador.
   "temperatureC": null,
   "humidityPercent": null,
   "rssi": null,
+  "mac": null,
   "updatedAt": ""
 }
 ```
@@ -145,18 +146,20 @@ Requiere dispositivo.
   "batteryPercent": 86,
   "temperatureC": 23.8,
   "humidityPercent": 46,
-  "rssi": -61
+  "rssi": -61,
+  "mac": "34:85:18:01:02:03"
 }
 ```
 
 Rangos validados:
 
-| Campo | Rango |
+| Campo | Rango / Formato |
 |---|---:|
 | `batteryPercent` | `0` a `100` |
-| `temperatureC` | `-40` a `85` |
-| `humidityPercent` | `0` a `100` |
+| `temperatureC` | `-40` a `85` (1 decimal) |
+| `humidityPercent` | `0` a `100` (1 decimal) |
 | `rssi` | `-150` a `20` |
+| `mac` | Formato MAC válido ej. `XX:XX:XX:XX:XX:XX` |
 
 ### `GET /api/device/status`
 

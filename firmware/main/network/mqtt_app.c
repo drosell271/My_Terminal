@@ -84,12 +84,12 @@ esp_err_t mqtt_app_apply_settings(const app_settings_t *settings)
     return ESP_OK;
 }
 
-static void number_or_null(char *target, size_t target_len, bool has_value, float value)
+static void number_or_null(char *target, size_t target_len, bool has_value, float value, int decimals)
 {
     if (!has_value) {
         strlcpy(target, "null", target_len);
     } else {
-        snprintf(target, target_len, "%.2f", value);
+        snprintf(target, target_len, "%.*f", decimals, value);
     }
 }
 
@@ -142,15 +142,21 @@ esp_err_t mqtt_app_publish_sensors(const app_settings_t *settings, const sensor_
     char temp[16];
     char humidity[16];
     char rssi[16];
+    char mac[24];
 
-    number_or_null(battery, sizeof(battery), reading->has_battery, reading->battery_percent);
-    number_or_null(voltage, sizeof(voltage), reading->has_battery, reading->battery_voltage);
-    number_or_null(temp, sizeof(temp), reading->has_temperature, reading->temperature_c);
-    number_or_null(humidity, sizeof(humidity), reading->has_humidity, reading->humidity_percent);
+    number_or_null(battery, sizeof(battery), reading->has_battery, reading->battery_percent, 2);
+    number_or_null(voltage, sizeof(voltage), reading->has_battery, reading->battery_voltage, 2);
+    number_or_null(temp, sizeof(temp), reading->has_temperature, reading->temperature_c, 1);
+    number_or_null(humidity, sizeof(humidity), reading->has_humidity, reading->humidity_percent, 1);
     if (reading->has_rssi) {
         snprintf(rssi, sizeof(rssi), "%d", reading->rssi);
     } else {
         strlcpy(rssi, "null", sizeof(rssi));
+    }
+    if (reading->has_mac && reading->mac[0] != '\0') {
+        strlcpy(mac, reading->mac, sizeof(mac));
+    } else {
+        strlcpy(mac, "null", sizeof(mac));
     }
 
     esp_err_t status = ESP_OK;
@@ -167,6 +173,9 @@ esp_err_t mqtt_app_publish_sensors(const app_settings_t *settings, const sensor_
         status = ESP_FAIL;
     }
     if (publish_topic(settings, "wifi/rssi", rssi) != ESP_OK) {
+        status = ESP_FAIL;
+    }
+    if (publish_topic(settings, "wifi/mac", mac) != ESP_OK) {
         status = ESP_FAIL;
     }
 

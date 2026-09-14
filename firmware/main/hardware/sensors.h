@@ -9,10 +9,12 @@ typedef struct {
     float temperature_c;
     float humidity_percent;
     int rssi;
+    char mac[18];
     bool has_battery;
     bool has_temperature;
     bool has_humidity;
     bool has_rssi;
+    bool has_mac;
 } sensor_reading_t;
 
 esp_err_t sensors_init(void);

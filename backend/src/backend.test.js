@@ -141,7 +141,22 @@ test("sensor defaults start empty until the device posts a reading", () => {
   assert.equal(sensors.temperatureC, null);
   assert.equal(sensors.humidityPercent, null);
   assert.equal(sensors.rssi, null);
+  assert.equal(sensors.mac, null);
   assert.equal(sensors.updatedAt, "");
+});
+
+test("sensor readings round temperature and humidity to 1 decimal place and normalize mac", () => {
+  const sensors = saveSensors({
+    batteryPercent: 88.45,
+    temperatureC: 23.456,
+    humidityPercent: 55.789,
+    rssi: -65,
+    mac: "aa:bb:cc:dd:ee:ff",
+  });
+
+  assert.equal(sensors.temperatureC, 23.5);
+  assert.equal(sensors.humidityPercent, 55.8);
+  assert.equal(sensors.mac, "AA:BB:CC:DD:EE:FF");
 });
 
 test("device status separates seen time from successful screen refresh", () => {
@@ -179,9 +194,11 @@ test("sensor and screen refresh timestamps can be synchronized with device cycle
     temperatureC: 22.5,
     humidityPercent: 50,
     rssi: -60,
+    mac: "34:85:18:01:02:03",
     updatedAt: cycleTimestamp,
   });
   assert.equal(sensors.updatedAt, cycleTimestamp);
+  assert.equal(sensors.mac, "34:85:18:01:02:03");
 
   const status = saveDeviceStatus({
     firmwareVersion: "test-fw",
